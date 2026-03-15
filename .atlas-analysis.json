@@ -1,0 +1,105 @@
+{
+  "projectType": "framework",
+  "projectName": "MVC PHP",
+  "projectDescription": "A lightweight PHP MVC framework featuring routing, an Eloquent-inspired ORM, middleware, authentication, templating, WebSocket server, and a suite of utility libraries for rapid web application development.",
+  "theme": "mint",
+  "primaryColor": "#6366f1",
+  "lightColor": "#818cf8",
+  "darkColor": "#4338ca",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Getting Started",
+        "groups": [
+          {
+            "group": "Introduction",
+            "pages": ["introduction", "quickstart", "installation"]
+          },
+          {
+            "group": "Configuration",
+            "pages": ["configuration/environment", "configuration/database", "configuration/app"]
+          }
+        ]
+      },
+      {
+        "tab": "Core Concepts",
+        "groups": [
+          {
+            "group": "MVC Architecture",
+            "pages": ["core/routing", "core/controllers", "core/models", "core/views"]
+          },
+          {
+            "group": "Database",
+            "pages": ["database/orm", "database/query-builder", "database/migrations", "database/seeders", "database/schema"]
+          },
+          {
+            "group": "Middleware & Auth",
+            "pages": ["advanced/middleware", "advanced/authentication", "advanced/sessions"]
+          }
+        ]
+      },
+      {
+        "tab": "Libraries",
+        "groups": [
+          {
+            "group": "Utilities",
+            "pages": ["libs/http", "libs/socket", "libs/email", "libs/filesystem", "libs/validator"]
+          },
+          {
+            "group": "CLI & Services",
+            "pages": ["libs/console", "libs/services"]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "MVC architecture with controller, model, and view separation",
+    "Fluent routing system with named routes, route groups, and parameter support",
+    "Eloquent-inspired ORM with hasOne, hasMany, and manyToMany relationships",
+    "SQL query builder with joins, pagination, and raw expressions",
+    "Database migrations and schema builder",
+    "Middleware pipeline for request/response lifecycle",
+    "Built-in authentication system (DB, PAM, API tokens)",
+    "WebSocket server inspired by Socket.io",
+    "HTTP client (Guzzle-powered) and request/response abstraction",
+    "SCSS compilation, QR code generation, spreadsheet export, image manipulation",
+    "CLI console system for custom commands",
+    "Environment-based configuration via config.env"
+  ],
+  "publicApiSurface": [
+    "Route::get($path, $action)",
+    "Route::post($path, $action)",
+    "Route::put($path, $action)",
+    "Route::delete($path, $action)",
+    "Route::group($prefix, $callback)",
+    "Route::middleware($middleware)",
+    "Model::find($id)",
+    "Model::all()",
+    "Model::create($data)",
+    "Model::where($column, $value)",
+    "Model::paginate($perPage)",
+    "Model::search($text)",
+    "Model::with($relations)",
+    "Model->save()",
+    "Model->update($data)",
+    "Model->delete()",
+    "Model->hasOne($table, $fk)",
+    "Model->hasMany($table, $fk)",
+    "Model->manyToMany($table, $pivot, $fk1, $fk2)",
+    "DB::table($table)",
+    "DB::execute($sql)",
+    "DB::flat($expression)",
+    "Schema::table($name, $callback)",
+    "Schema::tableIfNotExists($name, $callback)",
+    "Schema::dropIfExists($table)",
+    "Auth::login($credentials)",
+    "Auth::user()",
+    "Auth::logout()",
+    "Session::get($key)",
+    "Session::set($key, $value)",
+    "view($template, $data)",
+    "env($key, $default)",
+    "Config::get($key)"
+  ]
+}
