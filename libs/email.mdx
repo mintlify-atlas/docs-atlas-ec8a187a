@@ -1,0 +1,150 @@
+---
+title: "Email"
+description: "Send HTML emails and attachments via SMTP using PHPMailer."
+---
+
+The `Email` class (`libs\Middle\Email`) wraps [PHPMailer](https://github.com/PHPMailer/PHPMailer) and reads all SMTP settings from `config/email.php`.
+
+## Configuration
+
+### `config/email.php`
+
+```php
+return [
+    'host'     => env('EMAIL_HOST'),
+    'port'     => env('EMAIL_PORT'),
+    'username' => env('EMAIL_USERNAME'),
+    'password' => env('EMAIL_PASSWORD'),
+    'from'     => env('EMAIL_FROM'),
+];
+```
+
+### `config.env`
+
+```bash
+EMAIL_HOST=smtp.example.com
+EMAIL_PORT=587
+EMAIL_USERNAME=no-reply@example.com
+EMAIL_PASSWORD=secret
+EMAIL_FROM=no-reply@example.com
+```
+
+<Tip>
+Port `587` with STARTTLS is the default. The `Email` class uses `PHPMailer::ENCRYPTION_STARTTLS` — change the source if your provider requires SSL on port `465`.
+</Tip>
+
+## Sending an email
+
+```php
+use libs\Middle\Email;
+
+$sent = Email::send(
+    'recipient@example.com',  // $email  – recipient address
+    'My App',                  // $title  – sender display name ("From" name)
+    'Welcome to My App',       // $subject
+    '<h1>Hello!</h1><p>Thanks for signing up.</p>' // $body – HTML
+);
+
+if ($sent) {
+    // email queued / delivered
+} else {
+    // PHPMailer threw an exception; check your SMTP credentials
+}
+```
+
+### Method signature
+
+```php
+public static function send(
+    string $email,    // Recipient address
+    string $title,    // Sender display name
+    string $subject,  // Email subject line
+    string $body      // HTML body (UTF-8 encoded automatically)
+): bool
+```
+
+Returns `true` on success, `false` if PHPMailer throws an exception.
+
+## HTML email
+
+The body is always treated as HTML (`$mail->isHTML(true)`). You can pass any valid HTML string:
+
+```php
+$html = '
+<html>
+<body>
+    <h2>Password reset</h2>
+    <p>Click the link below to reset your password:</p>
+    <a href="' . $resetUrl . '">Reset password</a>
+</body>
+</html>';
+
+Email::send($user->email, 'My App', 'Reset your password', $html);
+```
+
+## Sending from a controller
+
+```php
+namespace app\Controllers;
+
+use libs\Middle\Email;
+
+class AuthController {
+
+    public function forgotPassword($request, $response) {
+        $token = bin2hex(random_bytes(32));
+        // … store token in DB …
+
+        $link = url('/reset-password?token=' . $token);
+        $body = '<p>Reset your password: <a href="' . $link . '">' . $link . '</a></p>';
+
+        $sent = Email::send(
+            $request->input('email'),
+            'My App',
+            'Password reset request',
+            $body
+        );
+
+        if (!$sent) {
+            return $response->json(['error' => 'Could not send email'], 500);
+        }
+
+        return $response->json(['message' => 'Check your inbox']);
+    }
+
+}
+```
+
+## Adding attachments (extending `Email`)
+
+The base `Email::send()` method does not accept attachment parameters. To send files, call PHPMailer directly, mirroring the same SMTP setup:
+
+```php
+use PHPMailer\PHPMailer\PHPMailer;
+use PHPMailer\PHPMailer\SMTP;
+use libs\Config;
+
+$mail = new PHPMailer(true);
+$mail->isSMTP();
+$mail->Host       = Config::email('host');
+$mail->SMTPAuth   = true;
+$mail->Username   = Config::email('username');
+$mail->Password   = Config::email('password');
+$mail->SMTPSecure = PHPMailer::ENCRYPTION_STARTTLS;
+$mail->Port       = Config::email('port');
+
+$mail->setFrom(Config::email('from'), 'My App');
+$mail->addAddress('recipient@example.com');
+$mail->isHTML(true);
+$mail->Subject = 'Your invoice';
+$mail->Body    = '<p>Please find your invoice attached.</p>';
+
+// Attach a file from disk
+$mail->addAttachment('/path/to/invoice.pdf', 'invoice.pdf');
+
+$mail->send();
+```
+
+<Note>
+PHPMailer is installed via Composer (`phpmailer/phpmailer ^6.8`). All PHPMailer features — CC, BCC, inline images, custom headers — are available when you instantiate `PHPMailer` directly.
+</Note>

@@ -1,0 +1,145 @@
+---
+title: "WebSocket server"
+description: "Run a WebSocket server to push real-time events to browser clients using the built-in SocketServer."
+---
+
+The `SocketServer` class (`libs\Socket\SocketServer`) implements a raw PHP WebSocket server. It handles the RFC 6455 handshake, frame encoding/decoding, and event dispatch in a single blocking loop.
+
+## Configuration
+
+Add the following variables to your `config.env` file:
+
+```bash
+SOCKET_HOST=127.0.0.1
+SOCKET_PORT=8080
+```
+
+The constructor reads both values automatically:
+
+```php
+public function __construct(){
+    $this->host = env('SOCKET_HOST');
+    $this->port = env('SOCKET_PORT');
+    // …
+}
+```
+
+## Starting the server
+
+Create a dedicated PHP entry point (for example `socket.php`) and run it from the CLI:
+
+```php
+<?php
+
+require 'vendor/autoload.php';
+require_once 'libs/helpers.php';
+
+use libs\Socket\SocketServer;
+
+$server = new SocketServer();
+
+// Register event handlers …
+
+$server->listen(); // blocking loop
+```
+
+```bash
+php socket.php
+```
+
+The server prints its address to stdout when it starts:
+
+```
+Servidor a activo 127.0.0.1:8080
+```
+
+## Registering event handlers
+
+Use `on()` to register a handler for a named event key. The server matches incoming JSON messages by their `key` field and dispatches to the correct handler.
+
+```php
+$server->on('chat', function(string $data, $client) use ($server) {
+    // $data   – raw JSON string from the client
+    // $client – socket resource of the sender
+    $server->emit('chat', $data, $client); // broadcast to others
+});
+
+$server->on('ping', function(string $data, $client) use ($server) {
+    $server->emit('ping', json_encode(['status' => 'pong']), $client);
+});
+```
+
+### Handler signature
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `$data` | `string` | Raw JSON payload sent by the client |
+| `$client` | `resource` | PHP socket resource of the connecting client |
+
+## Emitting events
+
+`emit()` sends a message to all connected clients on a given event channel.
+
+```php
+// Broadcast to every client subscribed to 'notifications'
+$server->emit('notifications', json_encode(['text' => 'Server restarting']));
+
+// Exclude the sender – pass their socket as the third argument
+$server->emit('chat', $data, $client);
+```
+
+<Note>
+The `emit()` method adds the event `key` to the outgoing JSON object automatically. The browser client can filter by `event.key`.
+</Note>
+
+## Broadcasting
+
+Calling `send()` directly lets you re-use a message that is already stored on the socket's internal state:
+
+```php
+$server->send('chat'); // sends to all clients
+$server->send('chat', $excludedClient); // sends to all except $excludedClient
+```
+
+## Browser client example
+
+```javascript
+const ws = new WebSocket('ws://127.0.0.1:8080');
+
+ws.onopen = () => {
+    ws.send(JSON.stringify({ key: 'chat', text: 'Hello!' }));
+};
+
+ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.key === 'chat') {
+        console.log(msg.text);
+    }
+};
+```
+
+<Warning>
+The WebSocket server runs as a long-lived PHP process separate from your web server. Use a process manager such as Supervisor or systemd to keep it running in production.
+</Warning>
+
+## Full example
+
+```php
+<?php
+
+require 'vendor/autoload.php';
+require_once 'libs/helpers.php';
+
+use libs\Socket\SocketServer;
+
+$server = new SocketServer();
+
+$server->on('chat', function(string $data, $client) use ($server) {
+    $json = json_decode($data);
+    // Attach a timestamp and re-broadcast
+    $json->time = date('H:i:s');
+    $server->emit('chat', json_encode($json), $client);
+});
+
+$server->listen();
+```

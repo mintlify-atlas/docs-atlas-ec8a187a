@@ -1,0 +1,308 @@
+---
+title: "Query builder"
+description: "Build and execute SQL queries fluently using DB::table() without writing raw SQL."
+---
+
+The query builder wraps PDO and constructs parameterised SQL statements through a chainable API. Every call to `DB::table()` returns a fresh `Table` instance.
+
+```php
+use libs\DB\DB;
+
+$rows = DB::table('user')->select()->get();
+```
+
+## Starting a query
+
+```php
+$query = DB::table('post'); // Table instance for the 'post' table
+```
+
+## Select
+
+Call `select()` with no arguments to select all columns (`SELECT *`), or pass specific column names.
+
+```php
+// All columns
+DB::table('user')->select()->get();
+
+// Specific columns
+DB::table('user')->select('id', 'name', 'email')->get();
+
+// Comma-separated string
+DB::table('user')->select('id, name, email')->get();
+
+// With a table prefix
+DB::table('post')->select('post.id', 'post.title')->get();
+```
+
+## Where clauses
+
+### Basic where
+
+```php
+// Equality (two-argument shorthand)
+DB::table('user')->select()->where('id', 1)->first();
+
+// Explicit operator
+DB::table('user')->select()->where('created_at', '>', '2024-01-01')->get();
+
+// Array of conditions (all joined with AND)
+DB::table('user')->select()->where(['active' => 1, 'role' => 'admin'])->get();
+```
+
+### LIKE
+
+```php
+DB::table('user')
+    ->select()
+    ->whereLike('name', '%alice%')
+    ->get();
+```
+
+### BETWEEN
+
+```php
+DB::table('order')
+    ->select()
+    ->whereBetween('total', [100, 500])
+    ->get();
+
+DB::table('order')
+    ->select()
+    ->whereNotBetween('total', [100, 500])
+    ->get();
+```
+
+### Raw WHERE
+
+```php
+DB::table('user')
+    ->select()
+    ->whereRaw('YEAR(created_at) = :year', ['year' => 2024])
+    ->get();
+```
+
+### Column comparison
+
+Compare two column values using `whereColumn()`. Values are wrapped in `DB::flat()` so they are not quoted as literals.
+
+```php
+DB::table('invoice')
+    ->select()
+    ->whereColumn('invoiced_at', 'paid_at')
+    ->get();
+```
+
+### Logical operators
+
+```php
+DB::table('user')
+    ->select()
+    ->where('role', 'admin')
+    ->or()
+    ->where('role', 'moderator')
+    ->get();
+
+DB::table('user')
+    ->select()
+    ->where('active', 1)
+    ->and()
+    ->where('verified_email_at', '!=', null)
+    ->get();
+```
+
+### Grouped conditions (closure)
+
+```php
+DB::table('user')
+    ->select()
+    ->where(function($q){
+        $q->where('role', 'admin')->or()->where('role', 'moderator');
+    })
+    ->and()
+    ->where('active', 1)
+    ->get();
+```
+
+## Joins
+
+```php
+// INNER JOIN
+DB::table('post')
+    ->select('post.*', 'user.name')
+    ->join('user')
+    ->onColumn('post.id_user', 'user.id')
+    ->get();
+
+// LEFT JOIN
+DB::table('post')
+    ->select('post.*')
+    ->leftJoin('comment')
+    ->onColumn('post.id', 'comment.id_post')
+    ->get();
+```
+
+Available join types: `join()`, `leftJoin()`, `rightJoin()`, `innerJoin()`.
+
+`on()` and `onColumn()` both set the `ON` condition. Use `onColumn()` when both sides are column references (neither value is quoted as a literal).
+
+## Ordering
+
+```php
+// Ascending
+DB::table('post')->select()->orderAsc('created_at')->get();
+
+// Descending
+DB::table('post')->select()->orderDesc('created_at')->get();
+
+// Explicit direction
+DB::table('post')->select()->orderBy('title', 'ASC')->get();
+
+// Raw expression
+DB::table('post')->select()->orderByRaw('RAND()')->limit(0, 5)->get();
+```
+
+## Limit and offset
+
+`limit($offset, $count)` maps directly to `LIMIT offset, count`.
+
+```php
+// Skip 0, take 10
+DB::table('post')->select()->limit(0, 10)->get();
+
+// Skip 20, take 10 (page 3)
+DB::table('post')->select()->limit(20, 10)->get();
+```
+
+## Grouping and HAVING
+
+```php
+DB::table('order')
+    ->select('id_user', DB::flat('COUNT(*) as total'))
+    ->group('id_user')
+    ->having('total', '>', 5)
+    ->get();
+```
+
+## Raw expressions — `DB::flat()`
+
+`DB::flat()` wraps a string so it is injected verbatim into the SQL without parameter binding or backtick quoting. Use it for SQL functions, column references in ON/WHERE clauses, and computed defaults.
+
+```php
+// COUNT in a select
+DB::table('user')
+    ->select(DB::flat('COUNT(*) as total'))
+    ->first();
+
+// CURRENT_TIMESTAMP as a default
+$table->timestamp('created_at')->default(DB::flat('CURRENT_TIMESTAMP'));
+
+// RAND() in ORDER BY
+DB::table('post')->select()->orderByRaw('RAND()')->limit(0, 1)->first();
+```
+
+<Warning>
+Never pass user-supplied input directly to `DB::flat()`. Because the value is not bound as a parameter it is vulnerable to SQL injection.
+</Warning>
+
+## Fetch methods
+
+| Method | Returns | Description |
+|---|---|---|
+| `get()` | `array` | All matching rows as associative arrays, or model instances when `model()` is set. |
+| `first()` | `array\|Model\|null` | The first matching row (appends `LIMIT 0,1`). |
+| `row()` | `array\|null` | Raw associative array of the first row (no model hydration). |
+| `rows()` | `array` | All rows as raw associative arrays. |
+| `exists()` | `bool` | `true` when at least one row matches. |
+| `execute()` | `PDOStatement` | Run the query and return the raw PDO statement. |
+
+```php
+// Associative array
+$row = DB::table('user')->select()->where('id', 1)->row();
+
+// All rows, raw
+$rows = DB::table('user')->select()->rows();
+
+// Boolean existence check
+$exists = DB::table('user')->select()->where('email', 'alice@example.com')->exists();
+```
+
+## Pagination
+
+`pagination($perPage, $page)` sets the correct `LIMIT` offset for the requested page.
+
+```php
+$perPage = 15;
+$page    = (int) ($_GET['page'] ?? 1);
+
+$rows = DB::table('post')
+    ->select()
+    ->orderDesc('created_at')
+    ->pagination($perPage, $page)
+    ->get();
+```
+
+<Tip>
+When working with models, prefer `Model::paginate()` which also computes totals and generates navigation links. See [ORM — Pagination](/database/orm#pagination).
+</Tip>
+
+## Insert
+
+```php
+// Single row (executes immediately)
+DB::table('user')->insert([
+    'name'  => 'Bob',
+    'email' => 'bob@example.com',
+]);
+
+// Multiple rows at once
+DB::table('log')->insert([
+    ['action' => 'login',  'id_user' => 1],
+    ['action' => 'logout', 'id_user' => 1],
+]);
+```
+
+## Update
+
+```php
+DB::table('user')
+    ->update(['name' => 'Bob Updated'])
+    ->where('id', 1)
+    ->execute();
+```
+
+## Delete
+
+```php
+DB::table('user')
+    ->delete()
+    ->where('id', 1)
+    ->execute();
+```
+
+## Transactions
+
+```php
+DB::transation(function($db){
+    DB::table('account')->update(['balance' => DB::flat('balance - 100')])->where('id', 1)->execute();
+    DB::table('account')->update(['balance' => DB::flat('balance + 100')])->where('id', 2)->execute();
+});
+```
+
+If the closure throws, the transaction is rolled back automatically.
+
+## Direct SQL execution
+
+```php
+$statement = DB::execute(
+    'SELECT * FROM user WHERE role = :role',
+    ['role' => 'admin']
+);
+$rows = $statement->fetchAll(\PDO::FETCH_ASSOC);
+```
+
+## Getting the last insert ID
+
+```php
+$id = DB::getConnection()->lastInsertId();
+```

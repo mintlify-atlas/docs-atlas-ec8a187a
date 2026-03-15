@@ -1,0 +1,137 @@
+---
+title: "Environment configuration"
+description: "All environment variables recognised by mvc-php and how the env() helper resolves them."
+---
+
+Environment variables are stored in `config.env` at the project root. The file is parsed once at boot time by `libs/Env.php` and all values are available everywhere via the `env()` global helper.
+
+## How `env()` works
+
+`libs/helpers.php` initialises the singleton on startup:
+
+```php
+Env::singleton("config.env");
+```
+
+The `env()` helper wraps `Env::get()` and `Env::set()`, supplying a default when the key is absent:
+
+```php
+function env($key, $default = null)
+{
+    if (!Env::has($key)) {
+        Env::set($key, $default);
+    }
+    return Env::get($key);
+}
+```
+
+`Env::get()` passes values through `filter_var(..., FILTER_VALIDATE_BOOLEAN)`, so string values such as `"true"` and `"false"` are automatically cast to their PHP boolean equivalents.
+
+### Env class internals
+
+The `Env` class (`libs/Env.php`) is a singleton that reads the file line-by-line:
+
+```php
+// Parses KEY=VALUE pairs (lines beginning with # are skipped)
+$key   = substr($line, 0, strpos($line, '='));
+$value = substr($line, strpos($line, '=') + 1);
+$_ENV[$key] ??= trim($value);   // existing $_ENV values are not overwritten
+```
+
+<Note>
+  Values already present in `$_ENV` (e.g. set by the OS or Docker) take precedence over `config.env` because of the `??=` assignment.
+</Note>
+
+## Variable reference
+
+Create `config.env` by copying the example file:
+
+```bash
+cp config.env.example config.env
+```
+
+### App
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `APP_NAME` | `localhost` | Human-readable application name. |
+| `APP_KEY` | `SOY_UNA_KEY` | Secret key used for encryption and signing. Change this before deploying. |
+| `APP_HOST` | `localhost` | The host the application is served from. |
+| `APP_DEBUG` | `true` | When `true`, full error details are shown. Set to `false` in production. |
+| `APP_LOCALE` | `es` | Default locale used by the `__()` translation helper. |
+| `APP_TIMEZONE` | `America/Mexico_City` | PHP timezone; passed to `date_default_timezone_set()`. |
+| `FAKER_LOCALE` | `es_ES` | Locale for `fakerphp/faker` when generating seed data. |
+
+```ini
+APP_NAME=localhost
+APP_KEY=SOY_UNA_KEY
+APP_HOST=localhost
+APP_DEBUG=true
+```
+
+<Warning>
+  Never commit `config.env` to version control. Add it to `.gitignore` and use the example file (`config.env.example`) as the committed template.
+</Warning>
+
+### Database
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `DB_HOST` | `localhost` | MySQL/MariaDB host. |
+| `DB_PORT` | `3306` | MySQL/MariaDB port. |
+| `DB_USER` | `root` | Database username. |
+| `DB_PASSWORD` | _(empty)_ | Database password. |
+| `DB_DATABASE` | `mvc_php` | Name of the database to connect to. |
+
+```ini
+DB_HOST=localhost
+DB_PORT=3306
+DB_USER=root
+DB_PASSWORD=
+DB_DATABASE=mvc_php
+```
+
+### Socket
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SOCKET_HOST` | `localhost` | Host for the WebSocket server. |
+| `SOCKET_PORT` | `3000` | Port the WebSocket server listens on. |
+
+```ini
+SOCKET_HOST=localhost
+SOCKET_PORT=3000
+```
+
+### Email
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `EMAIL_HOST` | `smtp.gmail.com` | SMTP server hostname (used by PHPMailer). |
+| `EMAIL_PORT` | `587` | SMTP port (587 = STARTTLS). |
+| `EMAIL_USERNAME` | _(empty)_ | SMTP authentication username. |
+| `EMAIL_PASSWORD` | _(empty)_ | SMTP authentication password. |
+| `EMAIL_FROM` | _(empty)_ | The "From" address on outgoing emails. |
+
+```ini
+EMAIL_HOST=smtp.gmail.com
+EMAIL_PORT=587
+EMAIL_USERNAME=
+EMAIL_PASSWORD=
+EMAIL_FROM=
+```
+
+## Session environment variables
+
+Session behaviour can also be controlled via env variables (all optional — the config file supplies defaults):
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `SESSION_DRIVER` | `database` | Storage driver: `database` or `file`. |
+| `SESSION_ENCRYPT` | `false` | Whether to encrypt session data. |
+| `SESSION_TABLE` | `session` | Database table name when using the `database` driver. |
+| `SESSION_COOKIE_NAME` | `SESSION_PHP` | Name of the session cookie. |
+| `SESSION_COOKIE_LIFETIME` | `120` | Cookie lifetime in minutes. |
+| `SESSION_COOKIE_SECURE` | `false` | Restrict cookie to HTTPS. |
+| `SESSION_COOKIE_HTTPONLY` | `true` | Prevent JavaScript access to the cookie. |
+| `SESSION_COOKIE_SAMESITE` | `Lax` | SameSite policy (`Lax`, `Strict`, or `None`). |

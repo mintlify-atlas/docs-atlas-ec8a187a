@@ -1,0 +1,244 @@
+---
+title: "Sessions"
+description: "Manage session data using file or database storage with an encrypted cookie."
+---
+
+The `Session` class provides a static API for reading and writing session data. Sessions are backed by either the filesystem or a database table, and the session ID is stored in an encrypted cookie.
+
+## Configuration
+
+Session behaviour is configured in `config/session.php`.
+
+```php
+// config/session.php
+return [
+
+    'driver'  => env('SESSION_DRIVER', 'database'),
+    'encrypt' => env('SESSION_ENCRYPT', false),
+
+    'file' => [
+        'path' => env('SESSION_PATH', storagePath('framework/sessions')),
+    ],
+
+    'database' => [
+        'table' => env('SESSION_TABLE', 'session'),
+    ],
+
+    'cookie' => [
+        'name'     => env('SESSION_COOKIE_NAME', 'SESSION_PHP'),
+        'lifetime' => env('SESSION_COOKIE_LIFETIME', 120),
+        'path'     => env('SESSION_COOKIE_PATH', '/'),
+        'domain'   => env('SESSION_COOKIE_DOMAIN', null),
+        'secure'   => env('SESSION_COOKIE_SECURE', false),
+        'httponly' => env('SESSION_COOKIE_HTTPONLY', true),
+        'samesite' => env('SESSION_COOKIE_SAMESITE', 'Lax'),
+        'payload'  => [
+            'csrf_token' => '_csrf_token',
+        ],
+    ],
+
+];
+```
+
+### Configuration reference
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `driver` | `database` | Storage backend: `file` or `database` |
+| `encrypt` | `false` | Encrypt session payload |
+| `file.path` | `storage/framework/sessions` | Directory for file-based sessions |
+| `database.table` | `session` | Table name for database-based sessions |
+| `cookie.name` | `SESSION_PHP` | Name of the session cookie |
+| `cookie.lifetime` | `120` | Cookie lifetime in minutes |
+| `cookie.secure` | `false` | Send cookie over HTTPS only |
+| `cookie.httponly` | `true` | Prevent JavaScript access to the cookie |
+| `cookie.samesite` | `Lax` | SameSite policy (`Lax`, `Strict`, or `None`) |
+
+<Tip>
+  Use the `database` driver in production. It lets you associate sessions with users and enables querying active sessions directly.
+</Tip>
+
+## Starting a session
+
+Sessions are started automatically by the `StartSession` middleware, which is registered as a global middleware in `MiddlewareService`.
+
+```php
+// libs/Session/Middleware/StartSession.php
+class StartSession extends Middleware
+{
+    public function handle(Request $request, Closure $next)
+    {
+        Session::singleton()->start();
+        return $next($request);
+    }
+}
+```
+
+You do not need to start sessions manually. If you need to start a session for a specific route that does not inherit global middleware, add the `session` alias:
+
+```php
+Route::get('/webhook', 'WebhookController@handle')->middleware('session');
+```
+
+## Reading and writing data
+
+### `Session::put()`
+
+Store a value in the session.
+
+```php
+Session::put('user_preference', 'dark_mode');
+Session::put('cart_items', [1, 2, 3]);
+```
+
+### `Session::get()`
+
+Retrieve a value by key. Returns `null` if the key does not exist.
+
+```php
+$preference = Session::get('user_preference');
+$items      = Session::get('cart_items');
+```
+
+### `Session::has()`
+
+Check whether a key is present.
+
+```php
+if (Session::has('user_preference')) {
+    // key exists
+}
+```
+
+### `Session::all()`
+
+Return all session data as an associative array.
+
+```php
+$data = Session::all();
+```
+
+### `Session::pull()`
+
+Retrieve a value and immediately remove it from the session.
+
+```php
+$message = Session::pull('flash_message');
+```
+
+### `Session::forget()`
+
+Remove a specific key from the session.
+
+```php
+Session::forget('cart_items');
+```
+
+### `Session::flush()`
+
+Clear all session data without destroying the session record.
+
+```php
+Session::flush();
+```
+
+### `Session::destroy()`
+
+Completely destroy the session, removing its storage record and deleting the cookie.
+
+```php
+Session::destroy();
+```
+
+## Session ID and regeneration
+
+```php
+// Get the current session ID
+$id = Session::id();
+
+// Regenerate the session ID (keeps existing data)
+Session::regenerate();
+
+// Get the session cookie name
+$name = Session::name();
+```
+
+<Note>
+  Regenerating the session ID after a privilege change (such as login) is good practice to prevent session fixation attacks.
+</Note>
+
+## CSRF token
+
+The session automatically initialises a CSRF token when it starts. You can read or regenerate it:
+
+```php
+// Get the current token
+$token = Session::token();
+
+// Force a new token (invalidates the old one)
+Session::regenerateToken();
+```
+
+Include `_token` in any non-GET form to pass CSRF validation:
+
+```html
+<form method="POST" action="/profile">
+    <input type="hidden" name="_token" value="<?= Session::token() ?>">
+    <!-- ... -->
+</form>
+```
+
+The `VerifyCsrfToken` middleware compares `_token` from the request against the value stored in the session. Requests to paths beginning with `api` are exempt.
+
+## How sessions are stored
+
+<Tabs>
+  <Tab title="File driver">
+    Each session is a serialised PHP file stored in `storage/framework/sessions/` (or the path set in `SESSION_PATH`). The filename is the session ID.
+
+    When a request arrives, `Session::sync()` reads the file, merges its values, then overwrites the file with the updated payload.
+
+    ```php
+    // Writing (inside Session::start())
+    $path = Config::session('file.path');
+    $file = $path . '/' . $this->session_id;
+    file_put_contents($file, $this->payload());
+    ```
+  </Tab>
+  <Tab title="Database driver">
+    Sessions are stored in the table defined by `SESSION_TABLE` (default: `session`). The payload column is encrypted.
+
+    When using the database driver, `AuthDB::_login()` also sets the `id_user` column on the session row, making it easy to query which session belongs to which user.
+
+    ```php
+    // Writing (inside Session::start())
+    DB::table($table)->insert([
+        'id'            => $this->session_id,
+        'ip_address'    => Request::ip(),
+        'user_agent'    => Request::userAgent(),
+        'payload'       => Secure::encrypt($this->payload()),
+        'last_activity' => date('Y-m-d H:i:s'),
+    ]);
+    ```
+  </Tab>
+</Tabs>
+
+## Session API reference
+
+| Method | Description |
+|--------|-------------|
+| `Session::put($key, $value)` | Store a value |
+| `Session::get($key)` | Retrieve a value (`null` if missing) |
+| `Session::has($key)` | Check if a key exists |
+| `Session::all()` | Return all session data |
+| `Session::pull($key)` | Retrieve and remove a value |
+| `Session::forget($key)` | Remove a key |
+| `Session::flush()` | Clear all data (keeps session) |
+| `Session::destroy()` | Destroy the session entirely |
+| `Session::id()` | Get the session ID |
+| `Session::name()` | Get the cookie name |
+| `Session::regenerate()` | Regenerate the session ID |
+| `Session::token()` | Get the CSRF token |
+| `Session::regenerateToken()` | Generate a new CSRF token |
+| `Session::isStarted()` | Check whether the session is active |
+| `Session::payload()` | Get the raw serialised payload |

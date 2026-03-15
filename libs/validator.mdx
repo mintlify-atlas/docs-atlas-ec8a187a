@@ -1,0 +1,207 @@
+---
+title: "Validation"
+description: "Validate request data against typed rules and return structured error messages."
+---
+
+Validation is provided by the `Validate` class (`libs\Validator\Validate`). Pass an array of data and a rules map to `Validate::make()` — it returns a `Validation` object you can interrogate for errors and validated values.
+
+## Basic usage
+
+```php
+use libs\Validator\Validate;
+
+$validation = Validate::make($request->all(), [
+    'name'     => 'required|string',
+    'email'    => 'required|email',
+    'age'      => 'required|integer',
+    'password' => 'required|confirmed',
+]);
+
+if ($validation->fails()) {
+    return $response->json(['errors' => $validation->errors()], 422);
+}
+
+$name  = $validation->get('name');
+$email = $validation->get('email');
+```
+
+## The `Validation` result object
+
+| Method | Returns | Description |
+|--------|---------|-------------|
+| `fails()` | `bool` | `true` if any rule failed |
+| `errors()` | `array` | Map of field → array of error messages |
+| `values()` | `array` | All input values (including unchanged ones) |
+| `get($key)` | `mixed` | Single validated value |
+| `set($key, $value)` | `Validation` | Override a value (chainable) |
+
+## Rule syntax
+
+Rules are pipe-separated strings. Parameters follow the rule name after a colon, separated by commas.
+
+```
+required|string
+required|integer
+nullable|string
+min:3
+max:100
+between:1,10
+in:active
+regex:/^[a-z]+$/
+unique:app\Models\User,email
+exists:app\Models\Role,id
+same:password
+confirmed
+```
+
+## Available rules
+
+<AccordionGroup>
+
+<Accordion title="Presence">
+
+| Rule | Description |
+|------|-------------|
+| `required` | Field must be present, non-empty, and not `"null"` |
+| `nullable` | If the field is empty or `"null"`, skip all subsequent rules for that field |
+
+</Accordion>
+
+<Accordion title="Type checks">
+
+| Rule | Description |
+|------|-------------|
+| `string` | Value must be a string (`is_string`) |
+| `integer` | Value must be a valid integer (`FILTER_VALIDATE_INT`) |
+| `decimal` | Value must be a valid float (`FILTER_VALIDATE_FLOAT`) |
+| `number` | Value must be numeric (`is_numeric`) |
+| `array` | Value must be a PHP array |
+| `boolean` | Value must be a PHP boolean |
+| `date` | Value must be parseable by `strtotime()` |
+| `json` | Value must be valid JSON |
+
+</Accordion>
+
+<Accordion title="Range and comparison">
+
+| Rule | Parameters | Description |
+|------|------------|-------------|
+| `min:n` | `n` – minimum | Value must be ≤ `n` |
+| `max:n` | `n` – maximum | Value must be ≥ `n` |
+| `between:a,b` | `a`, `b` | Value must be between `a` and `b` (inclusive) |
+| `in:value` | `value` | Value must equal `value` |
+
+</Accordion>
+
+<Accordion title="Format validation">
+
+| Rule | Description |
+|------|-------------|
+| `email` | Valid email address (`FILTER_VALIDATE_EMAIL`) |
+| `url` | Valid URL (`FILTER_VALIDATE_URL`) |
+| `ip` | Valid IP address (`FILTER_VALIDATE_IP`) |
+| `mask` | Valid IPv4 subnet mask |
+| `regex:pattern` | Value must match the regex pattern |
+
+</Accordion>
+
+<Accordion title="Database rules">
+
+| Rule | Parameters | Description |
+|------|------------|-------------|
+| `unique:Model,field` | Model FQCN, column | No record with that value must exist in the DB |
+| `exists:Model,field` | Model FQCN, column | A record with that value must exist in the DB |
+
+```php
+// Ensure the email is not already registered
+'email' => 'required|email|unique:app\\Models\\User,email',
+
+// Ensure the role_id references a real role
+'role_id' => 'required|integer|exists:app\\Models\\Role,id',
+```
+
+</Accordion>
+
+<Accordion title="Cross-field rules">
+
+| Rule | Parameters | Description |
+|------|------------|-------------|
+| `same:other` | Field name | Value must equal the value of `other` |
+| `different:other` | Field name | Value must not equal the value of `other` |
+| `confirmed` | — | Value must match the field named `{field}_confirmation` |
+
+</Accordion>
+
+</AccordionGroup>
+
+## Error messages
+
+Error messages are resolved from the `resources/lang/{locale}/validation.php` translation file using the rule key. Field labels come from `attributes.php`.
+
+The `errors()` array has the field name as key and an array of message strings as value:
+
+```php
+[
+    'email'    => ['The email field is required.'],
+    'password' => ['The password confirmation does not match.'],
+]
+```
+
+## Custom rules
+
+Register application-wide custom rules in a service (e.g. `RulesService`) using `Validator::make()`:
+
+```php
+use libs\Validator\Validator;
+
+// In app/Services/RulesService.php → handle()
+Validator::make('phone', function($key, $value, $array) {
+    return preg_match('/^\+?[0-9]{7,15}$/', $value);
+});
+```
+
+Then use it in any rule string:
+
+```php
+$validation = Validate::make($request->all(), [
+    'phone' => 'required|phone',
+]);
+```
+
+Add the translation key `validation.phone` to your language file to provide a human-readable error message.
+
+## Full controller example
+
+```php
+namespace app\Controllers;
+
+use libs\Validator\Validate;
+
+class UserController {
+
+    public function store($request, $response) {
+        $validation = Validate::make($request->all(), [
+            'name'                  => 'required|string',
+            'email'                 => 'required|email|unique:app\\Models\\User,email',
+            'password'              => 'required|confirmed',
+            'password_confirmation' => 'required|string',
+            'age'                   => 'nullable|integer',
+        ]);
+
+        if ($validation->fails()) {
+            return $response->json([
+                'errors' => $validation->errors(),
+            ], 422);
+        }
+
+        $user = \app\Models\User::create([
+            'name'     => $validation->get('name'),
+            'email'    => $validation->get('email'),
+            'password' => password_hash($validation->get('password'), PASSWORD_BCRYPT),
+        ]);
+
+        return $response->json(['id' => $user->id], 201);
+    }
+
+}
+```

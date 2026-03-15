@@ -1,0 +1,189 @@
+---
+title: "Controllers"
+description: "Organise request-handling logic into controller classes that extend the base Controller."
+---
+
+Controllers group related request-handling logic into a single class. Each public method can be wired to a route and receives the current `Request`.
+
+## Creating a Controller
+
+All application controllers live in `app/Controllers/` and extend the base `Controller` class:
+
+```php
+<?php
+
+namespace app\Controllers;
+
+use app\Controllers\Controller;
+
+class UserController extends Controller {
+
+    public function index(Request $request) {
+        // ...
+    }
+
+}
+```
+
+A ready-to-use template is provided at `libs/Template/Controller.txt`:
+
+```php
+<?php
+
+namespace {space};
+
+use app\Controllers\Controller;
+
+class {name} extends Controller {
+    
+}
+```
+
+## Referencing Controllers in Routes
+
+Pass a `'ClassName@method'` string as the route action. The framework resolves the class from the configured controllers path and invokes the method:
+
+```php
+use libs\Router\Route;
+
+Route::get('/users',         'UserController@index');
+Route::post('/users',        'UserController@store');
+Route::put('/users/{id}',    'UserController@update');
+Route::delete('/users/{id}', 'UserController@destroy');
+```
+
+## The Request Object
+
+The `Request` is passed as the first argument to every controller method. URL parameters, query-string values, POST fields, and JSON body keys are all accessible as properties:
+
+```php
+public function show(Request $request) {
+    $id    = $request->id;    // from a route parameter {id}
+    $query = $request->query; // from ?query=...
+}
+```
+
+## Returning Responses
+
+The base `Controller` class provides a fluent builder for structured JSON responses. Set the desired fields and call `response()` to emit the output:
+
+```php
+<?php
+
+namespace app\Controllers;
+
+use app\Controllers\Controller;
+use libs\HTTP\Request;
+
+class UserController extends Controller {
+
+    public function index(Request $request) {
+        $users = User::all();
+
+        return $this
+            ->setData($users)
+            ->setMessage('Users retrieved successfully')
+            ->response();
+    }
+
+    public function store(Request $request) {
+        $user = User::create([
+            'name'  => $request->name,
+            'email' => $request->email,
+        ]);
+
+        return $this
+            ->setCode(201)
+            ->setData($user)
+            ->response();
+    }
+
+    public function destroy(Request $request) {
+        $user = User::find($request->id);
+        $user->delete();
+
+        return $this
+            ->setMessage('Deleted')
+            ->response();
+    }
+
+}
+```
+
+All responses follow this envelope shape:
+
+```json
+{
+  "status": "success",
+  "data": null,
+  "message": "",
+  "errors": [],
+  "meta": null
+}
+```
+
+### Builder Methods
+
+| Method | Description |
+|---|---|
+| `setCode(int)` | HTTP status code (default `200`) |
+| `setStatus(string)` | Top-level `status` field (default `"success"`) |
+| `setData(mixed)` | Payload assigned to `data` |
+| `setMessage(string)` | Human-readable message |
+| `setErrors(array)` | Validation or application errors |
+| `setMeta(mixed)` | Pagination metadata or other extras |
+
+All setters return `$this`, so calls can be chained freely.
+
+## Returning Views
+
+Controllers can also return rendered HTML by calling the global `view()` helper:
+
+```php
+public function index(Request $request) {
+    return view('users.index', [
+        'users' => User::all(),
+    ]);
+}
+```
+
+<Note>
+  `view()` is a global helper that delegates to `Response::view()`. See the [Views](/core/views) page for template syntax details.
+</Note>
+
+## Base Controller — Source Reference
+
+The complete `app/Controllers/Controller.php`:
+
+```php
+<?php
+
+namespace app\Controllers;
+
+class Controller {
+    
+    private $code    = 200;
+    private $status  = 'success';
+    private $data    = null;
+    private $message = '';
+    private $errors  = [];
+    private $meta    = null;
+
+    public function response() {
+        return json([
+            'status'  => $this->status,
+            'data'    => $this->data,
+            'message' => $this->message,
+            'errors'  => $this->errors,
+            'meta'    => $this->meta
+        ], $this->code);
+    }
+
+    public function setCode($code)    { $this->code    = $code;    return $this; }
+    public function setStatus($status){ $this->status  = $status;  return $this; }
+    public function setData($data)    { $this->data    = $data;    return $this; }
+    public function setMessage($msg)  { $this->message = $msg;     return $this; }
+    public function setErrors($errors){ $this->errors  = $errors;  return $this; }
+    public function setMeta($meta)    { $this->meta    = $meta;    return $this; }
+}
+```

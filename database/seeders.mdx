@@ -1,0 +1,100 @@
+---
+title: "Seeders"
+description: "Populate your database with initial or test data using seeder classes."
+---
+
+Seeders let you fill tables with predictable data — admin accounts, lookup values, or large volumes of fake records for development and testing.
+
+## Creating a seeder
+
+Create a class in `database/seeders/` that extends `libs\DB\Seeder` and implement the `run()` method.
+
+`Seeder` extends `Faker`, which exposes `$this->faker` — a pre-initialised [FakerPHP](https://fakerphp.org/) instance you can use to generate realistic fake data.
+
+```php database/seeders/UserSeeder.php
+<?php
+
+namespace database\seeders;
+
+use libs\DB\Seeder;
+use libs\Middle\Secure;
+use app\Models\User;
+
+class UserSeeder extends Seeder{
+
+    public function run(){
+        // Create a fixed admin account
+        User::create([
+            'name'     => 'admin',
+            'email'    => 'admin@gmail.com',
+            'password' => Secure::encodePassword('123'),
+        ]);
+
+        // Create 10 users with fake data
+        for($index = 0; $index < 10; $index++){
+            User::create([
+                'name'     => $this->faker->name,
+                'email'    => $this->faker->email,
+                'password' => Secure::encodePassword('123'),
+            ]);
+        }
+    }
+
+}
+```
+
+## Calling multiple seeders
+
+Create an entry-point seeder that delegates to others using `$this->call()`.
+
+```php database/seeders/DatabaseSeeder.php
+<?php
+
+namespace database\seeders;
+
+use libs\DB\Seeder;
+
+class DatabaseSeeder extends Seeder{
+
+    public function run(){
+        $this->call([
+            \database\seeders\UserSeeder::class,
+        ]);
+    }
+
+}
+```
+
+`call()` instantiates each class in the array and invokes its `run()` method in order.
+
+## Running seeders
+
+```bash
+php manager db:seed
+```
+
+<Note>
+Seeders use `Model::create()` which respects `$fillable`. Make sure every column you want to seed is listed in the model's `$fillable` array.
+</Note>
+
+## Using Faker
+
+Because `Seeder` inherits from `Faker`, the `$this->faker` property is available in every seeder. It wraps [fakerphp/faker](https://fakerphp.org/).
+
+```php
+$this->faker->name;        // "John Doe"
+$this->faker->email;       // "alice@example.net"
+$this->faker->text(200);   // Lorem ipsum paragraph
+$this->faker->numberBetween(1, 100); // Random integer
+$this->faker->dateTimeBetween('-1 year', 'now'); // DateTime object
+$this->faker->url;         // "https://www.example.com/"
+$this->faker->imageUrl(640, 480); // Image URL
+```
+
+<Tip>
+Seeders are not automatically run when migrations execute. Run them separately after `php manager migrate`.
+</Tip>
+
+<Warning>
+Running seeders on a production database that already has real data can cause duplicate-key errors or overwrite existing records. Always confirm the target environment before running seeders.
+</Warning>

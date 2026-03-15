@@ -1,0 +1,166 @@
+---
+title: "Routing"
+description: "Define URL patterns and map them to closures or controller actions using the Route facade."
+---
+
+The router maps incoming HTTP requests to actions — either closures or controller methods. Routes are defined in the `routes/` directory and loaded automatically by the framework.
+
+## HTTP Methods
+
+The `Route` facade exposes a static method for each supported HTTP verb:
+
+```php
+use libs\Router\Route;
+
+Route::get($uri, $action);
+Route::post($uri, $action);
+Route::put($uri, $action);
+Route::delete($uri, $action);
+```
+
+Each method returns the router instance, so you can chain additional configuration fluently.
+
+## Closure vs Controller Actions
+
+An action can be either an anonymous function (closure) or a string in `ControllerClass@method` format.
+
+<Tabs>
+  <Tab title="Closure">
+    ```php
+    use libs\Router\Route;
+    use libs\HTTP\Request;
+
+    Route::get('/', function () {
+        return view('home');
+    });
+
+    Route::get('/test/{name?}', function (Request $request) {
+        $user = Auth::user();
+    });
+    ```
+
+    The closure receives a `Request` instance as its first argument when type-hinted.
+  </Tab>
+  <Tab title="Controller@method">
+    ```php
+    use libs\Router\Route;
+
+    Route::get('/users', 'UserController@index');
+    Route::post('/users', 'UserController@store');
+    Route::put('/users/{id}', 'UserController@update');
+    Route::delete('/users/{id}', 'UserController@destroy');
+    ```
+
+    The framework resolves the class from the configured controllers path and calls the specified method, passing the current `Request`.
+  </Tab>
+</Tabs>
+
+## Route Parameters
+
+Curly-brace segments in the URI are captured as named parameters and injected into the `Request` object under the `VAR` bag.
+
+### Required Parameters
+
+```php
+Route::get('/users/{id}', function (Request $request) {
+    $id = $request->id; // resolved from the URI
+});
+```
+
+### Optional Parameters
+
+Append `?` inside the braces to make a parameter optional:
+
+```php
+// Matches /test  AND  /test/alice
+Route::get('/test/{name?}', function (Request $request) {
+    // $request->name is null when not supplied
+})->name('test-get');
+```
+
+<Note>
+  Optional parameters must appear at the end of the URI pattern. A route with a missing required parameter is skipped during matching.
+</Note>
+
+## Named Routes
+
+Call `->name()` after any route registration to assign it a name. Named routes can be referenced elsewhere (e.g. redirects) without hard-coding the URI.
+
+```php
+Route::get('/', function () {
+    return view('home');
+})->name('home');
+
+Route::get('/test/{name?}', function (Request $request) {
+    // ...
+})->name('test-get');
+
+Route::post('/test', function (Request $request) {
+    // ...
+})->name('test-post');
+```
+
+## Route Groups
+
+Use `->group()` with a prefix string to share a URI prefix across several routes, or pass a closure to scope the group:
+
+```php
+// Prefix applied to all routes registered inside the closure
+Route::group('api/v1')->middleware('auth');
+
+Route::get('/users',  'UserController@index');
+Route::post('/users', 'UserController@store');
+
+// Reset group context by opening a new closure-based group
+Route::group(function () {
+    Route::get('/health', function () {
+        return json(['status' => 'ok']);
+    });
+});
+```
+
+<Tip>
+  When `group()` receives a closure, it executes the closure and then automatically resets the global group state, so subsequent routes are not affected.
+</Tip>
+
+## Middleware
+
+Call `->middleware()` to attach one or more middleware classes (or their registered aliases) to a route:
+
+```php
+// Single middleware by alias
+Route::get('/dashboard', 'DashboardController@index')->middleware('auth');
+
+// Multiple middleware
+Route::post('/admin/users', 'UserController@store')
+    ->middleware('auth', 'verified');
+
+// Full class name
+Route::get('/secret', 'SecretController@index')
+    ->middleware(\libs\Middle\Secure::class);
+```
+
+Middleware is executed in order before the route action is called. Each middleware receives the `Request` and a `$next` callable. Global middleware (registered on the application) is prepended automatically.
+
+## Combining Options
+
+All fluent methods can be chained together:
+
+```php
+Route::get('/profile/{id}', 'ProfileController@show')
+    ->name('profile.show')
+    ->middleware('auth');
+```
+
+## Route Files
+
+<CardGroup cols={2}>
+  <Card title="routes/web.php" icon="globe">
+    Browser-facing routes. CSRF protection and session middleware are applied here by convention.
+  </Card>
+  <Card title="routes/api.php" icon="code">
+    Stateless API routes. Responses are typically JSON.
+  </Card>
+</CardGroup>
+
+Both files are loaded by the framework bootstrap and share the same `Route` facade.

@@ -1,0 +1,194 @@
+---
+title: "Services"
+description: "Bootstrap application behaviour by registering services in Kernel.php — each service implements handle(), terminate(), and report()."
+---
+
+Services are PHP classes that implement the `ServiceImpl` interface. They run at application boot via `KernelApp` and let you organise startup logic — registering middleware, custom validation rules, error handlers, routes, and more — into focused, single-responsibility classes.
+
+## The `ServiceImpl` interface
+
+```php
+// libs/Service/Contract/ServiceImpl.php
+interface ServiceImpl {
+    public function handle();          // Runs at boot
+    public function terminate();       // Runs after handle() completes
+    public function report($ex);       // Runs if handle() or terminate() throws
+}
+```
+
+| Method | When it runs | Purpose |
+|--------|-------------|----------|
+| `handle()` | Application boot | Register middleware, rules, routes, etc. |
+| `terminate()` | After `handle()` returns | Cleanup or deferred work |
+| `report($ex)` | On uncaught exception in the service | Error reporting / logging |
+
+## Registering services in `Kernel.php`
+
+Add your service class to the `$services` array in `app/Kernel.php`. Services run in array order.
+
+```php
+// app/Kernel.php
+namespace app;
+
+use libs\KernelApp;
+
+class Kernel extends KernelApp {
+
+    protected $services = [
+        \app\Services\ReportService::class,    // Error reporting
+        \app\Services\RulesService::class,     // Validation rules
+        \app\Services\MiddlewareService::class, // Middleware aliases
+        \libs\Service\RoutingService::class,   // Framework routes
+        \app\Services\RouteService::class,     // Application routes
+    ];
+
+}
+```
+
+## How `KernelApp` runs services
+
+```php
+// libs/KernelApp.php
+protected function services() {
+    foreach ($this->services as $service) {
+        $instance = new $service;
+        try {
+            $instance->handle();
+            $instance->terminate();
+        } catch (\Exception $ex) {
+            $instance->report($ex);
+        }
+    }
+}
+```
+
+Each service is instantiated and `handle()` + `terminate()` are called in sequence. If either throws, `report()` is invoked instead of propagating the exception.
+
+## Built-in application services
+
+<CardGroup cols={2}>
+
+<Card title="ReportService" icon="triangle-exclamation">
+Configures PHP error reporting and registers the global `exception` and `error` handlers. Uses the `app.debug` config flag to toggle `display_errors`.
+</Card>
+
+<Card title="RulesService" icon="check">
+Registers all built-in validation rules (`required`, `email`, `unique`, `confirmed`, etc.) with the `Validator` singleton.
+</Card>
+
+<Card title="MiddlewareService" icon="shield">
+Registers global middleware (session start, CSRF) and named middleware aliases (`auth`, `guest`, `verify_email`, etc.).
+</Card>
+
+<Card title="RouteService" icon="route">
+Application-level route definitions. Add your custom routes here, or create additional services for feature areas.
+</Card>
+
+</CardGroup>
+
+## Creating a custom service
+
+<Steps>
+
+<Step title="Scaffold the file">
+
+```bash
+php manager new service PaymentService
+```
+
+This creates `app/Services/PaymentService.php` from the service template.
+</Step>
+
+<Step title="Implement the interface">
+
+```php
+// app/Services/PaymentService.php
+namespace app\Services;
+
+use libs\Service\Contract\ServiceImpl;
+
+class PaymentService implements ServiceImpl {
+
+    public function handle() {
+        // Register payment gateway config, webhooks, etc.
+    }
+
+    public function terminate() {
+        // Flush pending payment logs
+    }
+
+    public function report($ex) {
+        exception($ex);
+    }
+
+}
+```
+
+</Step>
+
+<Step title="Register it in Kernel.php">
+
+```php
+protected $services = [
+    \app\Services\ReportService::class,
+    \app\Services\RulesService::class,
+    \app\Services\MiddlewareService::class,
+    \libs\Service\RoutingService::class,
+    \app\Services\RouteService::class,
+    \app\Services\PaymentService::class, // <-- add here
+];
+```
+
+</Step>
+
+</Steps>
+
+## Example: registering validation rules in a service
+
+```php
+// app/Services/RulesService.php (excerpt)
+public function handle() {
+    Validator::make('required', function($key, $value, $array) {
+        return isset($array[$key])
+            && ($array[$key] !== '' && $array[$key] !== 'null' && $array[$key] !== null);
+    });
+
+    Validator::make('email', function($key, $value, $array, $params) {
+        return filter_var($value, FILTER_VALIDATE_EMAIL);
+    });
+
+    Validator::make('unique', function($key, $value, $array, $params) {
+        $model  = $params[0];
+        $field  = $params[1];
+        $exists = $model::where($field, $value)->first();
+        return $exists === null;
+    });
+}
+```
+
+## Example: registering middleware aliases in a service
+
+```php
+// app/Services/MiddlewareService.php
+public function handle() {
+    // Global middleware — runs on every request
+    Middleware::middleware([
+        \libs\Session\Middleware\StartSession::class,
+        \app\Middlewares\VerifyCsrfToken::class,
+    ]);
+
+    // Named aliases — apply with ->middleware('auth') on a route
+    Middleware::middlewareAlias([
+        'auth'         => \app\Middlewares\Authenticate::class,
+        'auth_api'     => \app\Middlewares\AuthenticateApi::class,
+        'guest'        => \app\Middlewares\Guest::class,
+        'verify_email' => \app\Middlewares\VerifyEmail::class,
+        'csrf'         => \app\Middlewares\VerifyCsrfToken::class,
+        'session'      => \libs\Session\Middleware\StartSession::class,
+    ]);
+}
+```
+
+<Note>
+Services are the recommended place for any code that must run once at application startup. Avoid putting boot logic in controllers or route files.
+</Note>

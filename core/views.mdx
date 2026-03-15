@@ -1,0 +1,244 @@
+---
+title: "Views"
+description: "Render HTML templates using the template engine, pass data from controllers, and build reusable components."
+---
+
+Views are PHP/HTML files stored in `resources/views/`. The template engine compiles a Blade-like syntax into plain PHP, caching the result for subsequent requests.
+
+## Rendering a View
+
+Use the global `view()` helper from anywhere — a closure, a controller method, or another view:
+
+```php
+// No data
+return view('home');
+
+// With data
+return view('users.index', [
+    'users' => User::all(),
+    'title' => 'All Users',
+]);
+```
+
+The helper delegates to `Response::view()`, which instantiates `libs\View\View` and calls `make()`.
+
+### Path Resolution
+
+`view('users.index')` resolves to `resources/views/users/index.php` (or `.html`). Dots in the name are converted to directory separators.
+
+## Template Syntax
+
+The engine transforms directives before caching. The original file is never executed directly.
+
+### Outputting Variables
+
+```blade
+{{$title}}
+{{csrfToken()}}
+{{url('assets/logo.png')}}
+```
+
+Double-braces compile to `<?php echo ...; ?>`.
+
+### Raw PHP Blocks
+
+```blade
+@php
+    $id ??= 'global-modal';
+    $view = '';
+@endphp
+```
+
+### Control Structures
+
+```blade
+@if($user)
+    <p>Welcome, {{$user->name}}</p>
+@elseif($guest)
+    <p>Hello, guest</p>
+@else
+    <p>Please log in</p>
+@endif
+
+@foreach($users as $user)
+    <li>{{$user->name}}</li>
+@endforeach
+
+@for($i = 0; $i < 10; $i++)
+    <span>{{$i}}</span>
+@endfor
+
+@while($condition)
+    ...
+@endwhile
+```
+
+### CSRF Field
+
+```blade
+<form method="POST">
+    @csrf
+    ...
+</form>
+```
+
+Compiles to a hidden `_token` input populated with the current session token.
+
+### Including Other Views
+
+```blade
+@include('layouts.header')
+```
+
+### Layout Inheritance
+
+Use `@extends` to embed the current view inside a layout file:
+
+```blade
+@extends('layouts.head')
+
+{{style('form.css')}}
+
+<div class="form-container">
+    ...
+</div>
+
+@extends('layouts.footer')
+```
+
+The layout files (`resources/views/layouts/head.php`, `footer.php`) wrap the page with HTML boilerplate:
+
+```php
+<!-- layouts/head.php -->
+<!DOCTYPE html>
+<html>
+<head>
+    <title>{{$title ?? env('APP_NAME')}}</title>
+    <meta charset="utf-8">
+    <meta name="_token" content="{{csrfToken()}}">
+</head>
+<body>
+@extends('layouts.header')
+```
+
+## Passing Data to Views
+
+Data is extracted into local variables inside the view. A key `'users'` in the data array becomes `$users` inside the template:
+
+<CodeGroup>
+
+```php Route / Controller
+Route::get('/users', function () {
+    return view('users.index', [
+        'users' => User::all(),
+        'title' => 'User List',
+    ]);
+});
+```
+
+```blade users/index.php
+@extends('layouts.head')
+
+<h1>{{$title}}</h1>
+
+@foreach($users as $user)
+    <p>{{$user->name}} — {{$user->email}}</p>
+@endforeach
+
+@extends('layouts.footer')
+```
+
+</CodeGroup>
+
+## View Components
+
+Components are reusable, optionally interactive blocks. They live in the configured components path and extend `libs\View\Component`.
+
+### Inline Component in a View
+
+```blade
+@component(loader)
+@component(modal)
+```
+
+Compiles to a `<div wire:render=...>` wrapper and invokes the component's `render()` method.
+
+If you don't want the wrapper element, use:
+
+```blade
+@componentNotRender(modal)
+```
+
+### Writing a Component
+
+Extend `libs\View\Component` and set the `$view` property to the template to render. Public properties are automatically passed as variables to that template:
+
+```php
+<?php
+
+namespace app\Components;
+
+use libs\View\Component;
+
+class Loader extends Component {
+    protected $view = 'components.loader';
+    public string $id = 'global-loader';
+}
+```
+
+The corresponding template at `resources/views/components/loader.php`:
+
+```blade
+@php
+    $id ??= 'global-loader';
+@endphp
+<div class="loader-container" id="{{$id}}" style="display: none">
+    <div class="background-overlay"></div>
+    <div class="loader"></div>
+    <img src="{{url('assets/logo.png')}}">
+</div>
+```
+
+### Component Middleware
+
+Components support the same middleware stack as routes. Declare `$middlewares` on the component class:
+
+```php
+class SecureWidget extends Component {
+    protected $view        = 'components.widget';
+    protected $middlewares = ['auth'];
+}
+```
+
+## SPA / Wire Scripts
+
+For live-component functionality, include the SPA script bundle in your layout:
+
+```blade
+@scriptsSPA
+```
+
+This injects the CSRF token and loads the Wire, Component, and SPA JavaScript modules.
+
+## Caching
+
+On first render, compiled output is written to the configured views cache directory. Subsequent requests reuse the cached file as long as it is newer than the source template — no manual cache clearing needed during development when files change.
+
+<Tip>
+  View files can use either a `.php` or `.html` extension. The engine tries both when resolving a template path.
+</Tip>
+
+## Global Helper Functions
+
+Several helpers are available inside any template:
+
+| Helper | Description |
+|---|---|
+| `url($path)` | Absolute URL to a public asset |
+| `style($path)` | `<link>` tag for a CSS file in `public/css/` |
+| `script($path)` | `<script>` tag for a JS file in `public/js/` |
+| `csrfToken()` | Current session CSRF token string |
+| `auth()` | `true` when a user is authenticated |
+| `user()` | Currently authenticated user model |
+| `__($key, $params)` | Localisation lookup |
+| `env($key)` | Read an environment variable |

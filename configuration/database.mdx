@@ -1,0 +1,83 @@
+---
+title: "Database configuration"
+description: "How mvc-php connects to MySQL/MariaDB and the available connection settings."
+---
+
+Database connection parameters are defined in `config/database.php`. Every value is read from the environment via the `env()` helper so the file itself never contains credentials.
+
+## config/database.php
+
+```php
+<?php
+
+return [
+
+    'host'     => env('DB_HOST'),
+    'user'     => env('DB_USER'),
+    'password' => env('DB_PASSWORD'),
+    'database' => env('DB_DATABASE'),
+    'port'     => env('DB_PORT'),
+    'engine'   => 'InnoDB',
+    'charset'  => 'utf8mb4'
+
+];
+```
+
+## Settings reference
+
+| Key | Env variable | Default | Description |
+|-----|-------------|---------|-------------|
+| `host` | `DB_HOST` | `localhost` | Hostname or IP of the MySQL/MariaDB server. |
+| `user` | `DB_USER` | `root` | Database username. |
+| `password` | `DB_PASSWORD` | _(empty)_ | Database password. |
+| `database` | `DB_DATABASE` | `mvc_php` | Name of the schema/database to use. |
+| `port` | `DB_PORT` | `3306` | TCP port the server listens on. |
+| `engine` | — | `InnoDB` | Storage engine used when creating new tables. Hard-coded. |
+| `charset` | — | `utf8mb4` | Character set for connections and new tables. Hard-coded. |
+
+<Note>
+  `engine` and `charset` are hard-coded in the config file. To change them, edit `config/database.php` directly.
+</Note>
+
+## Environment variables
+
+Set these in your `config.env` file (or as real environment variables in Docker / your hosting platform):
+
+```ini
+DB_HOST=localhost
+DB_PORT=3306
+DB_USER=root
+DB_PASSWORD=secret
+DB_DATABASE=my_app
+```
+
+See [Environment configuration](/configuration/environment) for a complete reference of all variables.
+
+## Accessing config values
+
+Anywhere in the application you can read database configuration with `Config::database()`:
+
+```php
+use libs\Config;
+
+$host    = Config::database('host');
+$charset = Config::database('charset'); // 'utf8mb4'
+```
+
+The `Config` class (`libs/Config.php`) resolves dot-notation keys against the array returned by `config/database.php`:
+
+```php
+// Loads config/database.php and returns $cfg['host']
+Config::database('host');
+```
+
+## Recommendations
+
+<CardGroup cols={2}>
+  <Card title="Use a non-root user" icon="shield">
+    Create a dedicated database user with only the permissions your app needs. Avoid using `root` in production.
+  </Card>
+  <Card title="Enable SSL in production" icon="lock">
+    When connecting over a network, configure your MySQL server to require SSL and pass the appropriate DSN options.
+  </Card>
+</CardGroup>

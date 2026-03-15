@@ -1,0 +1,413 @@
+---
+title: "Authentication"
+description: "Built-in authentication system with database, PAM, and API token drivers."
+---
+
+MVC PHP includes a flexible authentication system that supports three strategies: session-based database authentication (`AuthDB`), PAM (Pluggable Authentication Modules) authentication (`AuthPAM`), and stateless API token authentication. The active driver is selected automatically from your configuration.
+
+## Auth drivers
+
+<CardGroup cols={3}>
+  <Card title="Database (DB)" icon="database">
+    Validates credentials against a users table using hashed passwords. Persists the user ID in the session.
+  </Card>
+  <Card title="PAM" icon="server">
+    Delegates authentication to the operating system via `pam_auth()`. Useful for Linux server environments.
+  </Card>
+  <Card title="API Tokens" icon="key">
+    Stateless token authentication for API routes. Tokens are stored in an `access_token` table.
+  </Card>
+</CardGroup>
+
+## Configuration
+
+Authentication is configured in `config/auth.php`.
+
+```php
+// config/auth.php
+return [
+
+    'web' => [
+        'driver' => 'session',
+        'model'  => app\Models\User::class,
+    ],
+
+    'api' => [
+        'driver' => 'token',
+        'model'  => app\Models\User::class,
+    ],
+
+    'session' => [
+        'id_user'        => 'auth',
+        'remember_token' => 'token',
+    ],
+
+    'pam_auth' => false,
+
+];
+```
+
+| Key | Description |
+|-----|-------------|
+| `web.model` | Eloquent model used to look up users for session-based auth |
+| `api.model` | Model used when resolving a token's owner |
+| `session.id_user` | Session key used to store the authenticated user's primary key |
+| `session.remember_token` | Session key for the remember token |
+| `pam_auth` | Set to `true` to switch the driver from `AuthDB` to `AuthPAM` |
+
+<Note>
+  When `pam_auth` is `false` (the default), the `AuthDB` driver is used. Set it to `true` to use `AuthPAM` instead.
+</Note>
+
+## Driver selection
+
+The `Auth` class acts as a factory. On instantiation it reads `pam_auth` from config and delegates every call to either `AuthDB` or `AuthPAM`.
+
+```php
+// libs/Auth/Auth.php
+class Auth extends Singleton
+{
+    public function __construct()
+    {
+        $this->extends = config()->auth('pam_auth') ? AuthPAM::class : AuthDB::class;
+    }
+
+    public static function instance()
+    {
+        return new ((new self())->extends())();
+    }
+}
+```
+
+Both drivers extend `AuthFactory`, which defines the common interface:
+
+```php
+// libs/Auth/AuthFactory.php
+abstract class AuthFactory extends Singleton
+{
+    abstract public function _attempt($credentials);
+    abstract public function _login($user, $token = null);
+    abstract public function _logout();
+    abstract public function _user();
+    abstract public function _id();
+
+    public function _check()
+    {
+        return ($this->user === null)
+            ? Session::has($this->name_session)
+            : ($this->user !== null);
+    }
+
+    public function _token()
+    {
+        return $this->token;
+    }
+}
+```
+
+## Core Auth methods
+
+### Attempting login
+
+`Auth::attempt()` validates credentials and, on success, calls `Auth::login()` internally.
+
+<Tabs>
+  <Tab title="DB driver">
+    ```php
+    // Validate email + password against the users table
+    if (Auth::attempt(['email' => $email, 'password' => $password])) {
+        return redirect(route('dashboard'));
+    }
+
+    return redirect(route('login'))->with('error', 'Invalid credentials');
+    ```
+
+    The DB driver queries the model for all fields except `password`, then calls `Secure::verifyPassword()` to compare the hash.
+
+    ```php
+    // libs/Auth/AuthDB.php
+    public function _attempt($credentials)
+    {
+        $user = $this->model_user::visible('id', 'password')->find(function ($find) use ($credentials) {
+            foreach ($credentials as $key => $value) {
+                if ($key == 'password') {
+                    $find->select('id');
+                    $find->select($key);
+                    continue;
+                }
+                $find->select($key);
+                $find->where($key, $value);
+            }
+        });
+        if ($user == null) {
+            return false;
+        }
+        if (Secure::verifyPassword($credentials['password'], $user->password)) {
+            Auth::login($user);
+            return true;
+        }
+        return false;
+    }
+    ```
+  </Tab>
+  <Tab title="PAM driver">
+    ```php
+    // Validate against OS PAM
+    Auth::attempt(['user' => $username, 'password' => $password]);
+    ```
+
+    ```php
+    // libs/Auth/AuthPAM.php
+    public function _attempt($credentials)
+    {
+        if (pam_auth($credentials['user'], $credentials['password'])) {
+            Auth::login($credentials['user']);
+        }
+    }
+    ```
+  </Tab>
+</Tabs>
+
+### Logging in manually
+
+Pass a user model (or username string for PAM) directly.
+
+```php
+$user = User::find($id);
+Auth::login($user);
+```
+
+The DB driver stores the user's primary key in the session and, when using the `database` session driver, updates the `id_user` column on the session record.
+
+```php
+// libs/Auth/AuthDB.php
+public function _login($user, $token = null)
+{
+    $this->user  = $user;
+    $this->token = $token;
+    if (!Session::isStarted()) {
+        return;
+    }
+    Session::put($this->name_session, $user->{$user->primary_key});
+    if (Config::session('driver') == 'database') {
+        $table = Config::session('database.table');
+        DB::table($table)->update([
+            'id_user' => $user->{$user->primary_key},
+        ])->where('id', Session::id())->execute();
+    }
+}
+```
+
+### Getting the authenticated user
+
+```php
+$user = Auth::user();  // Returns model instance or null
+$id   = Auth::id();   // Returns primary key or null
+```
+
+The DB driver first checks the in-memory `$user` property, then falls back to resolving from the session:
+
+```php
+// libs/Auth/AuthDB.php
+public function _user()
+{
+    if ($this->user !== null) {
+        return $this->user;
+    }
+    $id = Session::get($this->name_session);
+    return $this->model_user::find($id);
+}
+```
+
+### Checking authentication state
+
+```php
+if (Auth::check()) {
+    // User is authenticated
+}
+```
+
+### Logging out
+
+```php
+Auth::logout();
+```
+
+This clears the in-memory user, removes the session key, and (for the database session driver) nullifies `id_user` on the session record.
+
+```php
+// libs/Auth/AuthDB.php
+public function _logout()
+{
+    $this->user = null;
+    Session::forget($this->name_session);
+    if (Config::session('driver') == 'database') {
+        $table = Config::session('database.table');
+        DB::table($table)->update([
+            'id_user' => null,
+        ])->where('id', Session::id())->execute();
+    }
+}
+```
+
+## Protecting routes
+
+Use the `auth` or `auth_api` middleware aliases to protect routes.
+
+```php
+// Web routes — session-based
+Route::get('/dashboard', 'DashboardController@index')->middleware('auth');
+
+// API routes — token-based
+Route::get('/api/profile', 'Api\ProfileController@show')->middleware('auth_api');
+```
+
+The `auth` middleware redirects unauthenticated users to the named route `login`.
+The `auth_api` middleware validates the `Authorization: Bearer <token>` header and returns `401` if the token is missing, expired, or invalid.
+
+```php
+// app/Middlewares/AuthenticateApi.php
+public function handle(Request $request, \Closure $next)
+{
+    $token        = $request->bearerToken();
+    $access_token = AccessToken::find(function ($find) use ($token) {
+        $find->where('token', $token);
+    });
+    if ($access_token) {
+        if ($access_token->hasExpired()) {
+            $access_token->delete();
+            return abort(401);
+        }
+        $access_token->last_activity = date('Y-m-d H:i:s');
+        $access_token->save();
+        $model = $access_token->tokenable();
+        if ($model == null) {
+            $access_token->delete();
+            return abort(401);
+        }
+        Auth::login($model, $access_token);
+        return $next($request);
+    }
+    return abort(401);
+}
+```
+
+## API tokens with `HasApiTokens`
+
+Add the `HasApiTokens` trait to your `User` model to enable token management.
+
+```php
+namespace app\Models;
+
+use libs\Auth\HasApiTokens;
+use libs\DB\Model;
+
+class User extends Model
+{
+    use HasApiTokens;
+}
+```
+
+### Creating a token
+
+```php
+$user  = Auth::user();
+$token = $user->createToken('mobile-app');
+
+// Return the raw token string to the client — it cannot be retrieved again
+return response()->json(['token' => $token->token]);
+```
+
+`createToken()` writes a record to the `access_token` table with a 1-year expiry, capturing the request's IP address and user agent.
+
+```php
+// libs/Auth/HasApiTokens.php
+public function createToken($name)
+{
+    $token                 = new AccessToken();
+    $token->id_tokenable   = $this->id;
+    $token->type_tokenable = $this->classType();
+    $token->name           = $name;
+    $token->token          = $this->generateToken();
+    $token->abilities      = json_encode(['*']);
+    $token->ip_address     = Request::ip();
+    $token->user_agent     = Request::userAgent();
+    $token->last_activity  = date('Y-m-d H:i:s');
+    $token->expire_at      = date('Y-m-d H:i:s', strtotime('+1 year'));
+    $token->save();
+    return $token;
+}
+```
+
+### Token abilities
+
+By default all tokens are created with `["*"]` (wildcard — all abilities). Use `tokenCan()` to check a specific ability.
+
+```php
+if ($user->tokenCan('mobile-app', 'reports:read')) {
+    // ...
+}
+```
+
+### Token management
+
+```php
+// List all tokens for the user
+$tokens = $user->tokens();
+
+// Get a specific token by name
+$token = $user->token('mobile-app');
+
+// Check whether a named token exists
+$user->hasToken('mobile-app');
+
+// Delete a single token
+$user->deleteToken('mobile-app');
+
+// Delete all tokens
+$user->deleteTokens();
+
+// Get a token's abilities
+$abilities = $user->tokenAbilities('mobile-app'); // e.g. ["*"]
+```
+
+## The AccessToken model
+
+`libs\Auth\Models\AccessToken` maps to the `access_token` table.
+
+```php
+// libs/Auth/Models/AccessToken.php
+class AccessToken extends Model
+{
+    // Resolve the model that owns this token
+    public function tokenable()
+    {
+        $class = $this->type_tokenable;
+        return $class::find($this->id_tokenable);
+    }
+
+    // Check whether the token has passed its expiry date
+    public function hasExpired()
+    {
+        return strtotime($this->expire_at) < time();
+    }
+
+    // Check whether the token grants a specific ability
+    public function can($ability)
+    {
+        $abilities = json_decode($this->abilities);
+        if ($abilities) {
+            foreach ($abilities as $a) {
+                if ($a == '*' || $a == $ability) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+}
+```
+
+<Warning>
+  Store the raw token value securely on the client side. Once returned from `createToken()`, the plain-text token is not retrievable from the database.
+</Warning>

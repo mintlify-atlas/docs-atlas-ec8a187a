@@ -1,0 +1,169 @@
+---
+title: "Installation"
+description: "System requirements, dependencies, and setup instructions for mvc-php."
+---
+
+## Requirements
+
+| Requirement | Version |
+|-------------|---------|
+| PHP | `<= 8.1.31` |
+| Composer | 2.x recommended |
+| MySQL / MariaDB | Any version supporting InnoDB + `utf8mb4` |
+| Apache (or Nginx) | With `mod_rewrite` enabled |
+
+## Composer dependencies
+
+All dependencies are declared in `composer.json` and installed with `composer install`.
+
+| Package | Version | Purpose |
+|---------|---------|----------|
+| `guzzlehttp/guzzle` | `^7.5` | HTTP client for outbound requests |
+| `phpmailer/phpmailer` | `^6.8` | SMTP email sending (used by email config) |
+| `intervention/image` | `^2.7` | Image processing and manipulation |
+| `fakerphp/faker` | `^1.21` | Fake data generation for seeders/testing |
+| `scssphp/scssphp` | `^1.11` | SCSS compilation to CSS |
+| `chillerlan/php-qrcode` | `^5.0` | QR code generation |
+| `phpoffice/phpspreadsheet` | `^3.6` | Excel / spreadsheet export |
+| `phpseclib/phpseclib` | `^3.0` | Cryptography and secure communications |
+
+Autoloading follows PSR-4 with two namespace roots:
+
+```json
+"autoload": {
+    "psr-4": {
+        "App\\": "app/",
+        "Libs\\": "libs/"
+    }
+}
+```
+
+## Manual setup
+
+<Steps>
+  <Step title="Clone the repository">
+    ```bash
+    git clone https://github.com/dogiloki/mvc-php my-app
+    cd my-app
+    ```
+  </Step>
+
+  <Step title="Install dependencies">
+    ```bash
+    composer install
+    ```
+
+    For production, add the optimise flag:
+
+    ```bash
+    composer install --no-dev --optimize-autoloader
+    ```
+  </Step>
+
+  <Step title="Configure environment">
+    ```bash
+    cp config.env.example config.env
+    ```
+
+    Edit `config.env` with your app name, database credentials, and any other required values. See [Environment configuration](/configuration/environment) for a full reference.
+  </Step>
+
+  <Step title="Set up the database">
+    Create the database named in `DB_DATABASE`, then run migrations:
+
+    ```bash
+    php manager migrate
+    ```
+  </Step>
+
+  <Step title="Configure the web server">
+    Set the document root to the `public/` directory. The `.htaccess` file in `public/` rewrites all requests to `index.php`:
+
+    ```apacheconf
+    # public/.htaccess (ships with the project)
+    RewriteEngine On
+
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteCond %{REQUEST_URI} (.+)/$
+    RewriteRule ^ %1 [L,R=301]
+
+    RewriteCond %{REQUEST_FILENAME} !-d
+    RewriteCond %{REQUEST_FILENAME} !-f
+    RewriteRule ^ index.php [L]
+    ```
+
+    <Warning>
+      Apache must have `mod_rewrite` enabled and `AllowOverride All` set for the directory, otherwise routing will not work.
+    </Warning>
+  </Step>
+
+  <Step title="Set directory permissions">
+    The web server process must be able to write to `storage/`:
+
+    ```bash
+    chown -R www-data:www-data storage
+    chmod -R 775 storage
+    ```
+  </Step>
+</Steps>
+
+## Docker setup
+
+The project ships with a `Dockerfile` targeting Apache on PHP 8.1 for deployment (originally designed for Railway).
+
+```dockerfile
+FROM php:8.1-apache
+
+# System dependencies
+RUN apt-get update && apt-get install -y \
+    curl git unzip \
+    libpng-dev libjpeg-dev libfreetype6-dev libzip-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Composer
+RUN curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+
+# PHP extensions
+RUN docker-php-ext-configure gd --with-freetype --with-jpeg \
+    && docker-php-ext-install gd zip pdo pdo_mysql
+
+COPY . /var/www/html/
+COPY docker/apache/default.conf /etc/apache2/sites-available/000-default.conf
+
+RUN echo "ServerName localhost" >> /etc/apache2/apache2.conf
+
+WORKDIR /var/www/html
+RUN composer install --no-interaction --optimize-autoloader
+
+RUN a2enmod rewrite
+RUN chown -R www-data:www-data /var/www/html
+RUN chmod -R 775 /var/www/html
+
+EXPOSE 80
+```
+
+The Apache virtual host (`docker/apache/default.conf`) points the document root at `/var/www/html/public`:
+
+```apacheconf
+<VirtualHost *:80>
+    DocumentRoot /var/www/html/public
+    ServerName localhost
+
+    <Directory /var/www/html/public>
+        Options Indexes FollowSymLinks
+        AllowOverride All
+        Require all granted
+    </Directory>
+</VirtualHost>
+```
+
+Build and run:
+
+```bash
+docker build -t mvc-php .
+docker run -p 8080:80 --env-file config.env mvc-php
+```
+
+<Note>
+  The Docker image installs Composer dependencies at build time (`composer install --no-interaction --optimize-autoloader`). Make sure `config.env` exists or is passed at runtime via `--env-file`.
+</Note>

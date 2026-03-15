@@ -1,0 +1,204 @@
+---
+title: "Schema builder"
+description: "Create and modify database tables using a fluent PHP API instead of raw SQL DDL."
+---
+
+The `Schema` class generates and executes `CREATE TABLE` and `ALTER TABLE` statements. It is used directly inside [migration](/database/migrations) files, which extend `Schema` via the `Migration` base class.
+
+## Creating tables
+
+### `table()`
+
+Creates the table, throwing an error if it already exists.
+
+```php
+use libs\DB\Schema;
+
+$schema = new Schema();
+$schema->table('post', function($table){
+    $table->id();
+    $table->string('title');
+    $table->text('body')->nullable();
+    $table->timestamps();
+});
+```
+
+### `tableIfNotExists()`
+
+Creates the table only when it does not yet exist (`CREATE TABLE IF NOT EXISTS`).
+
+```php
+$schema->tableIfNotExists('settings', function($table){
+    $table->id();
+    $table->string('key')->unique();
+    $table->text('value')->nullable();
+    $table->timestamps();
+});
+```
+
+<Note>
+Inside a migration file `$this` is the `Schema` instance, so you call `$this->table(...)` directly.
+</Note>
+
+## Dropping tables
+
+```php
+// Drop only if the table exists (safe)
+$schema->dropIfExists('post');
+
+// Drop unconditionally (throws if absent)
+$schema->drop('post');
+```
+
+## Column helpers
+
+These convenience methods cover the most common column patterns.
+
+### `id()`
+
+Adds a `BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY` column. Defaults to the column name `id`.
+
+```php
+$table->id();           // column: id
+$table->id('user_id'); // column: user_id
+```
+
+### `string()`
+
+Adds a `VARCHAR(255)` column.
+
+```php
+$table->string('email');
+$table->string('code', 6); // VARCHAR(6)
+```
+
+### `idForeign()`
+
+Adds a `BIGINT NOT NULL` column intended to hold a foreign key value.
+
+```php
+$table->idForeign('id_user')->foreign('user', 'id');
+```
+
+### `timestamps()`
+
+Adds `created_at` and `updated_at` timestamp columns. Pass `0` to add only `created_at`.
+
+```php
+$table->timestamps();  // created_at + updated_at
+$table->timestamps(0); // created_at only
+```
+
+Both columns are `TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP` with an index.
+
+## Adding any column type
+
+Call `add($name, $type, $size)` directly, or use the `__call` magic method which forwards the method name as the type:
+
+```php
+// Explicit
+$table->add('bio', 'text');
+$table->add('score', 'decimal', '8,2');
+
+// Magic shorthand (method name = type)
+$table->text('bio');
+$table->decimal('score', '8,2');
+$table->bigint('external_id');
+$table->timestamp('published_at');
+$table->int('sort_order');
+$table->tinyint('active');
+```
+
+<Note>
+Every call to `add()` / the magic shorthand returns a `Column` instance so you can chain modifiers immediately.
+</Note>
+
+## Column modifiers
+
+Modifiers are chained on the `Column` object returned by `add()`, `string()`, or any type shorthand.
+
+| Method | SQL effect |
+|---|---|
+| `nullable()` | `NULL` (omits `NOT NULL`). |
+| `autoIncrement()` | Appends `AUTO_INCREMENT`. |
+| `default($value)` | `DEFAULT value`. Pass a `DB::flat()` for SQL expressions. |
+| `primary()` / `primaryKey()` | Adds a `PRIMARY KEY` index. |
+| `unique()` | Adds a `UNIQUE` index. |
+| `index()` | Adds a plain `INDEX`. |
+| `fullText()` | Adds a `FULLTEXT` index. |
+| `foreign($table, $column)` / `foreignKey($table, $column)` | Adds a `FOREIGN KEY` constraint. |
+| `comment($text)` | Appends a `COMMENT`. |
+
+```php
+$table->string('email')->unique();
+$table->string('bio')->nullable();
+$table->int('views')->default(0);
+$table->timestamp('published_at')
+      ->default(DB::flat('CURRENT_TIMESTAMP'))
+      ->nullable()
+      ->index();
+$table->idForeign('id_user')->foreign('user', 'id');
+```
+
+## Altering existing tables
+
+### `append()` — add a column
+
+`append()` generates `ALTER TABLE ... ADD COLUMN`. Chain the same modifiers as when creating.
+
+```php
+$schema->table('post', function($table){
+    $table->append('slug', 'varchar')->unique();
+    $table->append('views', 'int')->default(0);
+});
+```
+
+### `dropColumn()` — remove a column
+
+`dropColumn()` generates `ALTER TABLE ... DROP COLUMN`.
+
+```php
+$schema->table('post', function($table){
+    $table->dropColumn('legacy_field');
+});
+```
+
+## Engine and charset
+
+The engine and charset are read from `config/database.php` (`InnoDB` and `utf8mb4` by default). Override them per table:
+
+```php
+$schema->table('log', function($table){
+    $table->engine('MyISAM');
+    $table->charset('utf8');
+    $table->id();
+    $table->text('message');
+    $table->timestamps();
+});
+```
+
+## Complete example
+
+The migration below shows a realistic combination of column types, modifiers, and foreign keys:
+
+```php
+public function up(): void{
+    $this->table('access_token', function($table){
+        $table->id();
+        $table->bigint('id_tokenable');
+        $table->string('type_tokenable');
+        $table->string('name');
+        $table->string('token')->unique();
+        $table->text('abilities');
+        $table->string('ip_address');
+        $table->string('user_agent');
+        $table->timestamp('last_activity')->default(DB::flat('CURRENT_TIMESTAMP'));
+        $table->timestamp('expire_at')->default(DB::flat('CURRENT_TIMESTAMP'));
+        $table->timestamps();
+    });
+}
+
+public function down(): void{
+    $this->dropIfExists('access_token');
+}
+```

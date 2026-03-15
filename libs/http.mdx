@@ -1,0 +1,207 @@
+---
+title: "HTTP"
+description: "Read incoming requests, send responses, and make outbound HTTP calls using the built-in HTTP layer."
+---
+
+The HTTP layer consists of three classes: `Request` for reading incoming data, `Response` for sending output, and `HTTP` for making outbound requests to external APIs.
+
+## Request
+
+The `Request` singleton (`libs\HTTP\Request`) is injected into every controller action and middleware. It gives you typed access to all incoming data.
+
+### Reading input data
+
+```php
+// All merged input ($_REQUEST + manually added values)
+$all = $request->all();
+
+// Query-string values
+$page  = $request->get('page');
+$all   = $request->get();       // returns full array
+
+// POST body values
+$name  = $request->post('name');
+$all   = $request->post();
+
+// PUT body values
+$value = $request->put('field');
+
+// Any input regardless of method
+$value = $request->input('field');
+```
+
+### Uploaded files
+
+```php
+// Returns the $_FILES entry for the given key
+$file = $request->files('avatar');
+```
+
+### Request metadata
+
+```php
+// HTTP verb: GET, POST, PUT, DELETE …
+$method = $request->method();
+
+// Client IP address
+$ip = Request::ip();
+
+// Browser user-agent string
+$ua = Request::userAgent();
+
+// Current request path (REQUEST_URI)
+$path = $request->path();
+```
+
+### Headers
+
+```php
+// All headers as associative array
+$headers = $request->header();
+
+// Single header by name
+$type = $request->header('Content-Type');
+
+// Bearer token from the Authorization header
+$token = $request->bearerToken();
+```
+
+### Filtering to a model's fillable fields
+
+`only()` intersects the request data with a model's fillable fields, preventing mass-assignment of non-fillable columns.
+
+```php
+$data = $request->only(\app\Models\User::class);
+```
+
+### Session and cookies
+
+```php
+$session = $request->session();
+$cookie  = $request->cookie();
+```
+
+---
+
+## Response
+
+The `Response` class (`libs\HTTP\Response`) is the return value of controller actions.
+
+### JSON responses
+
+```php
+// Set Content-Type: application/json and return encoded JSON
+return $response->json(['status' => 'ok', 'data' => $users]);
+
+// With an explicit HTTP status code
+return $response->json(['error' => 'Not found'], 404);
+```
+
+### Redirects
+
+```php
+// Redirect to an absolute or relative URL
+return $response->redirect('/dashboard');
+
+// Redirect to a named route
+return $response->route('users.index');
+
+// Redirect back to the previous page
+return $response->back();
+
+// Reload the current page
+return $response->reload();
+```
+
+### Rendering views
+
+```php
+return $response->view('pages.home', ['title' => 'Home']);
+```
+
+### Serving files
+
+```php
+// Stream a file to the browser (exits on success, 500 on missing file)
+return $response->file('/path/to/report.pdf');
+```
+
+### Aborting with an error
+
+The `abort()` method sets the HTTP status code, prints a message, and exits.
+
+```php
+return $response->abort(403);
+return $response->abort(404, 'That resource does not exist.');
+```
+
+Supported codes with default messages: `400`, `401`, `403`, `404`, `405`, `408`, `419`, `429`, `500`, `503`, `504`.
+
+### Exception handling
+
+```php
+try {
+    // …
+} catch (\Exception $ex) {
+    return $response->exception($ex); // respects app debug flag
+}
+```
+
+---
+
+## HTTP client (outbound requests)
+
+The `HTTP` class (`libs\HTTP\HTTP`) wraps [Guzzle](https://docs.guzzlephp.org/) to make outbound HTTP calls. Set `HTTP::$host` once and then call the method helpers.
+
+<Note>
+SSL verification is disabled (`'verify' => false`) in the client. Enable it in production by removing that option from `HTTP::request()`.
+</Note>
+
+### Configuration
+
+```php
+use libs\HTTP\HTTP;
+
+HTTP::$host = 'https://api.example.com';
+```
+
+### Making requests
+
+```php
+// GET request – params are ignored (appended in URI manually)
+$result = HTTP::get('/users', function($body) {
+    return $body;
+});
+
+// POST request – params are JSON-encoded in the body
+$result = HTTP::post('/users', function($body) {
+    if ($body === null) {
+        // request failed
+        return null;
+    }
+    return $body->id;
+}, [
+    'name'  => 'Ada',
+    'email' => 'ada@example.com',
+]);
+
+// PUT request
+$result = HTTP::put('/users/1', function($body) {
+    return $body;
+}, ['name' => 'Ada Lovelace']);
+
+// DELETE request
+$result = HTTP::delete('/users/1', function($body) {
+    return $body;
+});
+```
+
+The second argument to every method is a **callback** that receives the decoded JSON response body. If the request throws an exception the callback receives `null`.
+
+### Generic request
+
+```php
+$result = HTTP::request('PATCH', '/users/1', function($body) {
+    return $body;
+}, ['status' => 'active']);
+```

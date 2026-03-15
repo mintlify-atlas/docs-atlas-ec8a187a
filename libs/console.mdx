@@ -1,0 +1,166 @@
+---
+title: "Console commands"
+description: "Create and run CLI commands using the manager entry point and the Command/Manager system."
+---
+
+The framework ships with a CLI entry point called `manager`. Commands are registered as closures, support positional arguments, and receive a `Console` instance for terminal output.
+
+## Running commands
+
+```bash
+php manager <command> [arguments]
+```
+
+### Built-in commands
+
+| Command | Description |
+|---------|-------------|
+| `php manager new <type> <name>` | Scaffold a new file from a template |
+| `php manager create` | Create initial folders and files (e.g. `config.env`) |
+| `php manager migrate` | Run database migrations (up) |
+| `php manager migrate rollback` | Roll back the last migration batch |
+| `php manager seeder [name]` | Run database seeders |
+| `php manager db export [name]` | Export the database to a `.sql` file |
+| `php manager db import [name]` | Import a `.sql` backup file |
+| `php manager db show` | List available backups |
+| `php manager db remove <name>` | Delete a backup file |
+| `php manager server [port]` | Start the built-in PHP dev server (default port 8000) |
+| `php manager scss` | Watch and compile SCSS files |
+
+### Scaffolding new files
+
+The `new` command generates PHP files from templates in `libs/Template/`:
+
+```bash
+php manager new controller UserController
+php manager new model User
+php manager new migration create_users_table
+php manager new middleware Authenticate
+php manager new service PaymentService
+php manager new validator UserValidator
+php manager new seeder UserSeeder
+```
+
+## How commands work
+
+### `Manager` — the command registry
+
+`Manager` (`libs\Console\Manager`) is a singleton. Call `Manager::command()` to register a command, then `Manager::call($argv)` at the bottom of the entry point to dispatch.
+
+```php
+use libs\Console\Manager;
+
+Manager::command('greet {name}', function($console, $name) {
+    $console->success('Hello, ' . $name . '!');
+})->describe('Greet someone by name');
+
+Manager::call($argv); // dispatch — always at the end of `manager`
+```
+
+### `Command` — a single registered command
+
+Each call to `Manager::command()` creates a `Command` object. The first argument is the command **line pattern**. Positional placeholders are wrapped in braces:
+
+| Pattern | Behaviour |
+|---------|-----------|
+| `{name}` | Required argument |
+| `{name?}` | Optional argument (passes `null` when absent) |
+
+The `Command` class parses the pattern, separates the static command string from the argument list, and stores them internally.
+
+### `Console` — terminal output helpers
+
+A `Console` singleton is passed as the first argument to every command callback:
+
+```php
+Manager::command('demo', function($console) {
+    $console->info('Plain white text');
+    $console->success('Green text — operation succeeded');
+    $console->warning('Yellow text — something to note');
+    $console->error('Red text — something went wrong');
+    $console->dd($someVariable);   // print_r output
+
+    $answer = $console->ask('What is your name? ');
+    $console->success('Hello, ' . $answer);
+
+    $console->exit();  // exit(null)
+    $console->exit(1); // exit with code 1
+});
+```
+
+| Method | Output colour | Description |
+|--------|---------------|-------------|
+| `info($text)` | Default | Print plain text |
+| `success($text)` | Green | Print success message |
+| `warning($text)` | Yellow | Print a warning |
+| `error($text)` | Red | Print an error |
+| `dd($value)` | Default | `print_r` a value |
+| `ask($prompt)` | — | Read a line from stdin via `readline()` |
+| `exit($code)` | — | Exit with the given code |
+
+## Creating custom commands
+
+<Steps>
+
+<Step title="Open the manager entry point">
+All commands are registered in the `manager` file at the project root. Open it and add your command before the final `Manager::call($argv)` line.
+</Step>
+
+<Step title="Register your command">
+
+```php
+Manager::command('report generate {month?}', function($console, $month) {
+    $month = $month ?? date('Y-m');
+    $console->info('Generating report for ' . $month . ' …');
+
+    // … your logic here …
+
+    $console->success('Report saved to storage/app/reports/' . $month . '.csv');
+})->describe('Generate the monthly report');
+```
+
+</Step>
+
+<Step title="Run the command">
+
+```bash
+php manager report generate 2026-01
+# or without the optional argument:
+php manager report generate
+```
+
+</Step>
+
+</Steps>
+
+## Complete `manager` file structure
+
+```php
+<?php
+
+spl_autoload_register(function($clase) {
+    $path = str_replace("\\", "/", $clase) . ".php";
+    if (file_exists($path)) {
+        require_once($path);
+    }
+});
+
+require "vendor/autoload.php";
+require_once("libs/helpers.php");
+
+use libs\Console\Manager;
+
+// Built-in commands …
+
+// Your custom commands …
+Manager::command('hello {name}', function($console, $name) {
+    $console->success('Hello, ' . $name . '!');
+})->describe('Say hello');
+
+// Always last:
+Manager::call($argv);
+```
+
+<Warning>
+Always call `Manager::call($argv)` as the very last statement. Everything registered before it is available to the dispatcher.
+</Warning>

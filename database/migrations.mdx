@@ -1,0 +1,192 @@
+---
+title: "Migrations"
+description: "Version-control your database schema with migration files that can be applied and rolled back in order."
+---
+
+Migrations track schema changes as PHP files so every developer and every deployment environment applies exactly the same table structure in the same order.
+
+The `migration` table is created automatically on the first run and records which files have already been applied.
+
+## How migrations work
+
+<Steps>
+  <Step title="Create a migration file">
+    Add a PHP file to `database/migrations/`. Name it with a timestamp prefix so files sort chronologically — for example `2024_01_01_000000_create_table_post.php`.
+  </Step>
+  <Step title="Define up() and down()">
+    Implement `up()` to apply the change and `down()` to reverse it. Both methods receive `$this`, which is the `Schema` instance.
+  </Step>
+  <Step title="Run migrations">
+    Execute the manager command. Migrate reads every file not yet recorded in the `migration` table and calls `up()` on each one in order.
+  </Step>
+  <Step title="Roll back">
+    Running rollback calls `down()` on every migration in the latest batch, then removes those rows from the `migration` table.
+  </Step>
+</Steps>
+
+## Running migrations
+
+```bash
+# Apply all pending migrations
+php manager migrate
+
+# Roll back the latest batch
+php manager migrate:rollback
+```
+
+Internally `Migrate::migrate('up')` iterates `database/migrations/`, skips files already recorded in the `migration` table, and calls `up()` on each remaining file. `migrate('down')` does the reverse for the last batch.
+
+## Creating a migration file
+
+Each file must return an anonymous class that extends `libs\DB\Migration`.
+
+```php database/migrations/2024_01_01_000000_create_table_post.php
+<?php
+
+use libs\DB\Migration;
+
+return new class extends Migration{
+
+    public function up(): void{
+        $this->table('post', function($table){
+            $table->id();
+            $table->string('title');
+            $table->text('body');
+            $table->timestamps();
+        });
+    }
+
+    public function down(): void{
+        $this->dropIfExists('post');
+    }
+
+};
+```
+
+`Migration` extends `Schema`, so `$this` has access to all schema builder methods inside `up()` and `down()`.
+
+## Real migration examples
+
+### Users table
+
+```php database/migrations/2023_05_14_073040_create_table_user.php
+<?php
+
+use libs\DB\Migration;
+
+return new class extends Migration{
+
+    public function up(): void{
+        $this->table('user', function($table){
+            $table->id();
+            $table->string('name');
+            $table->string('email')->unique();
+            $table->string('verified_email_at')->nullable();
+            $table->string('password');
+            $table->timestamps();
+        });
+    }
+
+    public function down(): void{
+        $this->dropIfExists('user');
+    }
+
+};
+```
+
+### Pivot table with foreign keys
+
+```php database/migrations/2023_05_28_044755_create_table_user_permission.php
+<?php
+
+use libs\DB\Migration;
+
+return new class extends Migration{
+
+    public function up(): void{
+        $this->table('user_permission', function($table){
+            $table->id();
+            $table->idForeign('id_user')->foreign('user', 'id');
+            $table->idForeign('id_permission')->foreign('permission', 'id');
+            $table->timestamps();
+        });
+    }
+
+    public function down(): void{
+        $this->dropIfExists('user_permission');
+    }
+
+};
+```
+
+### Table with timestamp defaults
+
+```php database/migrations/2023_09_24_190546_create_table_access_token.php
+<?php
+
+use libs\DB\Migration;
+use libs\DB\DB;
+
+return new class extends Migration{
+
+    public function up(): void{
+        $this->table('access_token', function($table){
+            $table->id();
+            $table->bigint('id_tokenable');
+            $table->string('type_tokenable');
+            $table->string('name');
+            $table->string('token')->unique();
+            $table->text('abilities');
+            $table->string('ip_address');
+            $table->string('user_agent');
+            $table->timestamp('last_activity')->default(DB::flat('CURRENT_TIMESTAMP'));
+            $table->timestamp('expire_at')->default(DB::flat('CURRENT_TIMESTAMP'));
+            $table->timestamps();
+        });
+    }
+
+    public function down(): void{
+        $this->dropIfExists('access_token');
+    }
+
+};
+```
+
+## The `migration` tracking table
+
+The `Migrate` class creates this table automatically:
+
+| Column | Type | Description |
+|---|---|---|
+| `id` | `bigint` (PK, auto-increment) | Row identifier. |
+| `name` | `varchar` (unique) | Migration filename without `.php`. |
+| `batch` | `int` | Groups migrations applied together. |
+| `applied_at` | `datetime` | Timestamp of when the migration ran. |
+
+## Using Schema inside a migration
+
+Because `Migration` extends `Schema`, every schema builder method is available via `$this`. See [Schema builder](/database/schema) for the full column API.
+
+```php
+public function up(): void{
+    // Create a new table
+    $this->tableIfNotExists('settings', function($table){
+        $table->id();
+        $table->string('key')->unique();
+        $table->text('value')->nullable();
+        $table->timestamps();
+    });
+}
+
+public function down(): void{
+    $this->dropIfExists('settings');
+}
+```
+
+<Tip>
+Always implement `down()`. A rollback that cannot undo its migration leaves the database in an inconsistent state.
+</Tip>
+
+<Warning>
+Migration files are loaded with `require_once`. Make sure each file has a unique class name or uses an anonymous class (the recommended pattern).
+</Warning>

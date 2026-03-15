@@ -1,0 +1,161 @@
+---
+title: "File storage"
+description: "Configure storage paths, store uploaded files, and access filesystem locations via config/filesystem.php."
+---
+
+All filesystem paths used by the framework are declared in `config/filesystem.php`. You can retrieve any path at runtime with the `Config::filesystem()` helper.
+
+## Path configuration
+
+```php
+// config/filesystem.php
+return [
+
+    'storage' => [
+        'path'   => 'storage',
+        'app'    => 'storage/app',
+        'public' => 'storage/app/public',
+        'files'  => 'storage/app/files',
+        'qr'     => 'storage/app/qr',
+    ],
+
+    'public' => [
+        'path' => 'public',
+        'url'  => url() . 'public',
+    ],
+
+    'database' => [
+        'path'       => 'database',
+        'migrations' => 'database/migrations',
+        'seeders'    => 'database/seeders',
+    ],
+
+    'routes'      => ['path' => 'routes'],
+    'controllers' => ['path' => 'app/Controllers'],
+    'models'      => ['path' => 'app/Models'],
+    'middlewares' => ['path' => 'app/Middlewares'],
+    'services'    => ['path' => 'app/Services'],
+    'validators'  => ['path' => 'app/Validators'],
+    'components'  => ['path' => 'app/Components'],
+
+    'views' => [
+        'path'  => 'resources/views',
+        'cache' => 'storage/framework/views',
+    ],
+
+    'logs' => [
+        'path' => 'storage/logs',
+        'file' => 'storage/logs/app.log',
+        'channels' => [
+            'info'      => ['path' => 'storage/logs/info'],
+            'error'     => ['path' => 'storage/logs/error'],
+            'warning'   => ['path' => 'storage/logs/warning'],
+            'debug'     => ['path' => 'storage/logs/debug'],
+            'notice'    => ['path' => 'storage/logs/notice'],
+            'critical'  => ['path' => 'storage/logs/critical'],
+            'alert'     => ['path' => 'storage/logs/alert'],
+            'emergency' => ['path' => 'storage/logs/emergency'],
+        ],
+    ],
+
+    'cache' => [
+        'path' => 'storage/framework/cache',
+        'file' => 'storage/framework/cache/files.json',
+    ],
+
+];
+```
+
+## Reading paths at runtime
+
+Use `Config::filesystem()` with dot notation to retrieve a path:
+
+```php
+use libs\Config;
+
+$storagePath = Config::filesystem('storage.app');    // 'storage/app'
+$publicPath  = Config::filesystem('storage.public'); // 'storage/app/public'
+$filesPath   = Config::filesystem('storage.files');  // 'storage/app/files'
+$publicUrl   = Config::filesystem('public.url');     // 'https://example.com/public'
+```
+
+## Storing uploaded files
+
+Retrieve the uploaded file from the request and write it to the configured storage path:
+
+```php
+public function upload($request, $response) {
+    $file = $request->files('avatar');
+
+    if (!$file || $file['error'] !== UPLOAD_ERR_OK) {
+        return $response->json(['error' => 'Upload failed'], 422);
+    }
+
+    $ext      = pathinfo($file['name'], PATHINFO_EXTENSION);
+    $filename = uniqid('avatar_') . '.' . $ext;
+    $dest     = Config::filesystem('storage.public') . '/' . $filename;
+
+    move_uploaded_file($file['tmp_name'], $dest);
+
+    return $response->json(['path' => $dest]);
+}
+```
+
+## Publicly accessible files
+
+Files written to `storage/app/public` should be symlinked or served from your web server under the `public/` directory. The configured public URL is:
+
+```php
+$url = Config::filesystem('public.url') . '/' . $filename;
+// e.g. https://example.com/public/avatar_abc123.jpg
+```
+
+## Log channels
+
+The framework writes log files into channel sub-directories under `storage/logs/`. Each severity level — `info`, `error`, `warning`, `debug`, `notice`, `critical`, `alert`, `emergency` — has its own directory:
+
+```
+storage/
+└── logs/
+    ├── app.log
+    ├── info/
+    ├── error/
+    ├── warning/
+    └── …
+```
+
+## Bootstrap file creation
+
+The `create` key lets you declare files that should be created on first run if they do not already exist. The `php manager create` command processes this list:
+
+```php
+'create' => [
+    'files' => [
+        [
+            'path'    => 'config.env',
+            'content' => file_get_contents('config.env.example'),
+        ],
+    ],
+],
+```
+
+```bash
+php manager create
+```
+
+## Running system processes
+
+The `Process` class (`libs\System\Process`) wraps `exec()` for running shell commands:
+
+```php
+use libs\System\Process;
+
+$proc = new Process('ls -la storage/app');
+$proc->start();
+
+foreach ($proc->output() as $line) {
+    echo $line . "\n";
+}
+
+$exitCode = $proc->return(); // 0 on success
+```

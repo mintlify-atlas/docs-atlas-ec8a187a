@@ -1,0 +1,297 @@
+---
+title: "Models"
+description: "Interact with database tables using the Model base class — find, create, update, delete, and define relationships."
+---
+
+Every database table is represented by a model class that extends `libs\DB\Model`. The base class wires static method calls into the underlying query builder automatically.
+
+## Defining a Model
+
+Create a class in `app/Models/`, extend `Model`, and declare the protected configuration properties:
+
+```php
+<?php
+
+namespace app\Models;
+
+use libs\DB\Model;
+
+class User extends Model {
+
+    protected $table       = 'user';
+    protected $primary_key = 'id';      // default — can be omitted
+    protected $fillable    = [
+        'name',
+        'email',
+        'verified_email_at',
+        'password',
+    ];
+    protected $hidden  = ['password'];  // excluded from serialisation
+    protected $busable = ['name', 'email']; // columns searched by search()
+
+}
+```
+
+A scaffold template is available at `libs/Template/Model.txt`.
+
+### Protected Properties
+
+| Property | Type | Description |
+|---|---|---|
+| `$table` | `string` | Database table name |
+| `$primary_key` | `string` | Primary key column (default `'id'`) |
+| `$fillable` | `array` | Columns that may be mass-assigned |
+| `$hidden` | `array` | Columns stripped before serialisation |
+| `$busable` | `array\|null` | Columns searched by `search()`. Falls back to `$fillable` when `null` |
+
+## Static Query Methods
+
+All static methods are proxied through `__callStatic`, which creates a fresh model instance and either calls the corresponding `_method()` or delegates to the query builder.
+
+### find()
+
+Look up a single record by primary key, or use a closure for a custom query:
+
+```php
+// By primary key
+$user = User::find(1);
+
+// By arbitrary column
+$user = User::find('alice@example.com', 'email');
+
+// Using a closure (returns first result)
+$user = User::find(function ($query) {
+    $query->where('email', 'alice@example.com');
+});
+
+// Using a closure — return collection by passing an array as second arg
+$users = User::find(function ($query) {
+    $query->where('verified_email_at', null);
+}, []);
+```
+
+### all()
+
+Retrieve every row in the table:
+
+```php
+$users = User::all();
+```
+
+### create()
+
+Insert a new row. Only columns listed in `$fillable` are written:
+
+```php
+$user = User::create([
+    'name'     => 'Alice',
+    'email'    => 'alice@example.com',
+    'password' => password_hash('secret', PASSWORD_DEFAULT),
+]);
+```
+
+Returns the hydrated model instance (with `id` and `created_at` populated).
+
+### where()
+
+Delegate directly to the query builder:
+
+```php
+$admins = User::where('role', 'admin')->get();
+$user   = User::where('email', 'alice@example.com')->first();
+```
+
+### search()
+
+Perform a `LIKE` search across all `$busable` columns, combining clauses with `OR`:
+
+```php
+$results = User::search('alice')->get();
+```
+
+### paginate()
+
+Return a `Paginator` object containing a page of results:
+
+```php
+// 10 results per page, first page
+$paginator = User::paginate(10, 1);
+
+// With a customisation closure
+$paginator = User::paginate(function ($query) {
+    return $query->each(function ($user) {
+        $user->role = $user->role(); // eager-load a relation
+    })->orderDesc('created_at');
+}, 30, $currentPage);
+
+// $paginator->data          — array of model instances
+// $paginator->current_page
+// $paginator->total_pages
+// $paginator->total_results
+```
+
+### random()
+
+Return one or more randomly ordered rows:
+
+```php
+$user  = User::random();   // single model
+$users = User::random(5);  // collection of 5
+```
+
+## Instance Methods
+
+### save()
+
+Insert or update the record. If the primary key is set and a matching row exists, it updates; otherwise it inserts:
+
+```php
+$user = new User();
+$user->name  = 'Bob';
+$user->email = 'bob@example.com';
+$user->save();
+
+echo $user->id; // populated after insert
+```
+
+### update()
+
+Update a specific set of columns on an existing record:
+
+```php
+$user = User::find(1);
+$user->update(['name' => 'Bobby']);
+```
+
+Only columns present in `$fillable` are written to the database.
+
+### delete()
+
+Delete the record identified by the model's primary key:
+
+```php
+$user = User::find(1);
+$user->delete();
+```
+
+## Custom Instance Methods
+
+Add any business-logic method directly to the model class:
+
+```php
+class User extends Model {
+    // ...
+    public function full() {
+        return 'Hola, ' . $this->name;
+    }
+}
+
+$user = User::find(1);
+echo $user->full(); // "Hola, Alice"
+```
+
+## Relationships
+
+Relationship methods are defined on the model and use the protected helpers provided by the base class.
+
+### hasOne()
+
+```php
+class User extends Model {
+    public function profile() {
+        // hasOne(relatedModel, foreignKey, relatedKey)
+        return $this->hasOne(Profile::class, 'user_id');
+    }
+}
+
+$user    = User::find(1);
+$profile = $user->profile; // auto-resolved via __get
+```
+
+### hasMany()
+
+```php
+class User extends Model {
+    public function posts() {
+        // hasMany(relatedModel, foreignKeyOnRelated, localKey)
+        return $this->hasMany(Post::class, 'user_id');
+    }
+}
+
+$posts = User::find(1)->posts; // returns a collection
+```
+
+### manyToMany()
+
+```php
+class User extends Model {
+    public function roles() {
+        // manyToMany(relatedModel, pivotModel, pivotFkForThis, pivotFkForRelated)
+        return $this->manyToMany(Role::class, UserRole::class, 'user_id', 'role_id');
+    }
+}
+
+$roles = User::find(1)->roles;
+```
+
+<Note>
+  Accessing a relationship as a property (e.g. `$user->posts`) triggers `__get`, which executes the query and returns results immediately. `HasMany` and `ManyToMany` relations return a collection; `HasOne` returns a single model.
+</Note>
+
+## Eager Loading with with()
+
+Call `with()` to pre-load relations or computed attributes before fetching results, avoiding N+1 queries:
+
+```php
+// Eager-load a single relation
+$users = User::with('posts')->get();
+
+// Nested eager-loading
+$users = User::with('posts.comments')->get();
+```
+
+Passing a key-value array attaches arbitrary attributes to every result:
+
+```php
+$users = User::with(['extra_flag' => true])->get();
+```
+
+## Transformations with each()
+
+The `each()` method registers a closure that is called on every model instance after it is hydrated. Use it to add computed properties or rename fields:
+
+```php
+$users = User::each(function ($user) {
+    $user->display_name = strtoupper($user->name);
+    $user->role = $user->role(); // resolve a relation
+})->get();
+```
+
+`each()` is chainable and works inside `paginate()` closures:
+
+```php
+$paginator = User::paginate(function ($query) {
+    return $query->each(function ($user) {
+        $user->role = $user->role();
+    })->orderDesc('created_at');
+}, 30, $page);
+```
+
+## Traits
+
+The `User` model ships with two optional traits that extend its capabilities:
+
+```php
+use libs\Auth\HasApiTokens;
+use libs\Permission\HasRoles;
+
+class User extends Model {
+    use HasApiTokens, HasRoles;
+    // ...
+}
+```
+
+| Trait | Provides |
+|---|---|
+| `HasApiTokens` | API token issuance and verification |
+| `HasRoles` | Role and permission checks |

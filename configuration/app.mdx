@@ -1,0 +1,218 @@
+---
+title: "App configuration"
+description: "Application, session, and filesystem configuration files, and how to read them with Config::get()."
+---
+
+Beyond the environment file, mvc-php uses PHP config files in the `config/` directory. Each file returns a plain PHP array. The `Config` class (`libs/Config.php`) loads these files on demand and resolves dot-notation keys.
+
+## How Config::get() works
+
+`Config` uses PHP's magic `__callStatic` so the file name becomes the method name:
+
+```php
+Config::{filename}('{dot.notation.key}')
+```
+
+For example:
+
+```php
+use libs\Config;
+
+// Reads config/app.php, returns $cfg['timezone']
+Config::app('timezone');
+
+// Reads config/session.php, returns $cfg['cookie']['name']
+Config::session('cookie.name');
+
+// Reads config/filesystem.php, returns $cfg['views']['path']
+Config::filesystem('views.path');
+```
+
+Internally, `Config::call()` (`libs/Config.php:19`) explodes the key on `.`, then traverses the array:
+
+```php
+public static function call($name, $keys)
+{
+    $keys     = explode('.', $keys[0] ?? '');
+    $filename = 'config/' . $name . '.php';
+    $cfg      = require($filename);
+
+    $value = $cfg;
+    foreach ($keys as $key) {
+        $value = $value[$key] ?? null;
+    }
+    return $value;
+}
+```
+
+<Note>
+  When the config file is `filesystem` and the returned value is a non-array directory path, `Config::call()` will automatically create the directory with `mkdir()` if it does not already exist.
+</Note>
+
+---
+
+## config/app.php
+
+```php
+<?php
+
+return [
+    'debug'        => (bool) env('APP_DEBUG', true),
+    'host'         => env('APP_HOST'),
+    'key'          => env('APP_KEY'),
+    'locale'       => env('APP_LOCALE', 'es'),
+    'faker_locale' => env('FAKER_LOCALE', 'es_ES'),
+    'timezone'     => env('APP_TIMEZONE', 'America/Mexico_City'),
+];
+```
+
+| Key | Env variable | Default | Description |
+|-----|-------------|---------|-------------|
+| `debug` | `APP_DEBUG` | `true` | Enables verbose error output. Disable in production. |
+| `host` | `APP_HOST` | — | Application host (used for URL generation). |
+| `key` | `APP_KEY` | — | Secret key for cryptographic operations. |
+| `locale` | `APP_LOCALE` | `es` | Default locale for the `__()` translation helper. |
+| `faker_locale` | `FAKER_LOCALE` | `es_ES` | Locale passed to `fakerphp/faker`. |
+| `timezone` | `APP_TIMEZONE` | `America/Mexico_City` | PHP timezone; applied via `date_default_timezone_set()`. |
+
+---
+
+## config/session.php
+
+```php
+<?php
+
+return [
+    'driver'  => env('SESSION_DRIVER', 'database'),
+    'encrypt' => env('SESSION_ENCRYPT', false),
+
+    'file' => [
+        'path' => env('SESSION_PATH', storagePath('framework/sessions')),
+    ],
+
+    'database' => [
+        'table' => env('SESSION_TABLE', 'session'),
+    ],
+
+    'cookie' => [
+        'name'     => env('SESSION_COOKIE_NAME', 'SESSION_PHP'),
+        'lifetime' => env('SESSION_COOKIE_LIFETIME', 120),
+        'path'     => env('SESSION_COOKIE_PATH', '/'),
+        'domain'   => env('SESSION_COOKIE_DOMAIN', null),
+        'secure'   => env('SESSION_COOKIE_SECURE', false),
+        'httponly' => env('SESSION_COOKIE_HTTPONLY', true),
+        'samesite' => env('SESSION_COOKIE_SAMESITE', 'Lax'),
+        'payload'  => [
+            'csrf_token' => '_csrf_token',
+        ],
+    ],
+];
+```
+
+### Driver
+
+| Value | Description |
+|-------|-------------|
+| `database` | Sessions are stored in the database table defined by `SESSION_TABLE`. |
+| `file` | Sessions are written to `storage/framework/sessions` (or the path in `SESSION_PATH`). |
+
+### Cookie options
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `name` | `SESSION_PHP` | Cookie name sent to the browser. |
+| `lifetime` | `120` | Cookie lifetime in minutes. |
+| `path` | `/` | Cookie path scope. |
+| `domain` | `null` | Cookie domain scope. |
+| `secure` | `false` | Send only over HTTPS. Set to `true` in production. |
+| `httponly` | `true` | Prevents JavaScript from reading the cookie. |
+| `samesite` | `Lax` | Controls cross-site request behaviour. |
+
+<Warning>
+  In production, set `SESSION_COOKIE_SECURE=true` and consider enabling `SESSION_ENCRYPT=true`.
+</Warning>
+
+---
+
+## config/filesystem.php
+
+This file maps logical path keys to actual filesystem paths used throughout the framework.
+
+```php
+<?php
+
+return [
+    'storage' => [
+        'path'   => 'storage',
+        'app'    => 'storage/app',
+        'public' => 'storage/app/public',
+        'files'  => 'storage/app/files',
+        'qr'     => 'storage/app/qr',
+    ],
+
+    'public' => [
+        'path' => 'public',
+        'url'  => url() . 'public',
+    ],
+
+    'database' => [
+        'path'       => 'database',
+        'migrations' => 'database/migrations',
+        'seeders'    => 'database/seeders',
+    ],
+
+    'routes'      => ['path' => 'routes'],
+    'controllers' => ['path' => 'app/Controllers'],
+    'models'      => ['path' => 'app/Models'],
+    'middlewares' => ['path' => 'app/Middlewares'],
+    'services'    => ['path' => 'app/Services'],
+    'validators'  => ['path' => 'app/Validators'],
+    'components'  => ['path' => 'app/Components'],
+    'lang'        => ['path' => 'resources/lang'],
+
+    'views' => [
+        'path'  => 'resources/views',
+        'cache' => 'storage/framework/views',
+    ],
+
+    'logs' => [
+        'path' => 'storage/logs',
+        'file' => 'storage/logs/app.log',
+        'channels' => [
+            'info'      => ['path' => 'storage/logs/info'],
+            'error'     => ['path' => 'storage/logs/error'],
+            'warning'   => ['path' => 'storage/logs/warning'],
+            'debug'     => ['path' => 'storage/logs/debug'],
+            'notice'    => ['path' => 'storage/logs/notice'],
+            'critical'  => ['path' => 'storage/logs/critical'],
+            'alert'     => ['path' => 'storage/logs/alert'],
+            'emergency' => ['path' => 'storage/logs/emergency'],
+        ],
+    ],
+
+    'cache' => [
+        'path' => 'storage/framework/cache',
+        'file' => 'storage/framework/cache/files.json',
+    ],
+];
+```
+
+### Common lookups
+
+```php
+use libs\Config;
+
+Config::filesystem('views.path');          // 'resources/views'
+Config::filesystem('views.cache');         // 'storage/framework/views'
+Config::filesystem('logs.channels.error.path'); // 'storage/logs/error'
+Config::filesystem('controllers.path');    // 'app/Controllers'
+Config::filesystem('storage.public');      // 'storage/app/public'
+```
+
+The `storagePath()` helper is a shortcut for `storage.*` paths:
+
+```php
+// Equivalent calls
+storagePath('framework/sessions');
+Config::filesystem('storage.path') . '/framework/sessions';
+```

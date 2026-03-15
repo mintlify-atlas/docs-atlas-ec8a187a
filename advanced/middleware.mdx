@@ -1,0 +1,289 @@
+---
+title: "Middleware"
+description: "Intercept and filter HTTP requests through a chainable middleware pipeline."
+---
+
+Middleware provides a mechanism for filtering HTTP requests entering your application. Each middleware sits in a pipeline between the router and your controller — it can inspect, modify, or reject the request before it reaches the action, and optionally perform work after the response is sent.
+
+## How the pipeline works
+
+When a request matches a route, the framework calls each middleware assigned to that route in order. Each middleware receives the `$request` and a `$next` closure. Calling `$next($request)` passes control to the next middleware in the chain. If a middleware does not call `$next`, the pipeline stops and the action is never reached.
+
+```php
+// libs/Router/Route.php (simplified)
+public function call(Request $request, $index_middlewares = 0, $do_call = true)
+{
+    $middleware = $this->middlewares[$index_middlewares] ?? null;
+    if ($middleware == null) {
+        if ($do_call == 1) {
+            $this->callAction($request);
+            exit;
+        }
+        return true;
+    }
+    if (class_exists($middleware)) {
+        $middleware = new $middleware();
+    } else {
+        $middleware = new (Middleware::alias($middleware))();
+    }
+    try {
+        return $middleware->handle($request, function ($request) use ($index_middlewares, $do_call) {
+            return $this->call($request, $index_middlewares + 1, $do_call);
+        });
+    } catch (\Exception $ex) {
+        return $middleware->report($ex);
+    }
+}
+```
+
+## The base middleware class
+
+All middleware extend `libs\Middle\Middleware`, which declares three lifecycle methods:
+
+```php
+// libs/Middle/Middleware.php
+namespace libs\Middle;
+
+use libs\HTTP\Request;
+
+abstract class Middleware
+{
+    /**
+     * Called automatically when the middleware runs.
+     */
+    public function handle(Request $request, \Closure $next)
+    {
+        return $next($request);
+    }
+
+    /**
+     * Called after the middleware completes.
+     */
+    public function terminate(Request $request, \Closure $response)
+    {
+    }
+
+    /**
+     * Report exceptions or errors.
+     */
+    public function report(\Exception $ex)
+    {
+    }
+}
+```
+
+| Method | When it runs | Typical use |
+|--------|-------------|-------------|
+| `handle()` | Before the action | Authentication checks, CSRF validation, session start |
+| `terminate()` | After the response | Logging, cleanup |
+| `report()` | On uncaught exception | Custom error handling |
+
+## Creating a middleware
+
+<Steps>
+  <Step title="Create the class">
+    Add a new file in `app/Middlewares/`. Extend `libs\Middle\Middleware` and implement `handle()`.
+
+    ```php
+    // app/Middlewares/RequireAdmin.php
+    namespace app\Middlewares;
+
+    use libs\Middle\Middleware;
+    use libs\Auth\Auth;
+    use libs\HTTP\Request;
+
+    class RequireAdmin extends Middleware
+    {
+        public function handle(Request $request, \Closure $next)
+        {
+            $user = Auth::user();
+            if ($user == null || $user->role !== 'admin') {
+                return abort(403, 'Forbidden');
+            }
+            return $next($request);
+        }
+    }
+    ```
+  </Step>
+
+  <Step title="Register an alias (optional)">
+    Open `app/Services/MiddlewareService.php` and add the alias inside `handle()`.
+
+    ```php
+    Middleware::middlewareAlias([
+        'auth'         => \app\Middlewares\Authenticate::class,
+        'auth_api'     => \app\Middlewares\AuthenticateApi::class,
+        'guest'        => \app\Middlewares\Guest::class,
+        'verify_email' => \app\Middlewares\VerifyEmail::class,
+        'csrf'         => \app\Middlewares\VerifyCsrfToken::class,
+        'session'      => \libs\Session\Middleware\StartSession::class,
+        'admin'        => \app\Middlewares\RequireAdmin::class, // <-- new
+    ]);
+    ```
+  </Step>
+
+  <Step title="Apply to a route">
+    Use the alias string or the fully-qualified class name.
+
+    ```php
+    // Using an alias
+    Route::get('/admin/dashboard', 'AdminController@index')->middleware('admin');
+
+    // Using the class name directly
+    Route::get('/admin/dashboard', 'AdminController@index')
+        ->middleware(\app\Middlewares\RequireAdmin::class);
+    ```
+  </Step>
+</Steps>
+
+## Built-in middleware
+
+The framework ships with several ready-to-use middleware classes.
+
+<CardGroup cols={2}>
+  <Card title="Authenticate" icon="lock">
+    Redirects unauthenticated users to the login route. Alias: `auth`.
+  </Card>
+  <Card title="AuthenticateApi" icon="key">
+    Validates a Bearer token and logs in the associated user. Alias: `auth_api`.
+  </Card>
+  <Card title="Guest" icon="user">
+    Redirects already-authenticated users away from guest-only pages (e.g. login). Alias: `guest`.
+  </Card>
+  <Card title="VerifyCsrfToken" icon="shield">
+    Validates the CSRF token on non-GET requests. Alias: `csrf`.
+  </Card>
+  <Card title="VerifyEmail" icon="mail">
+    Aborts with 401 if the authenticated user's email is not verified. Alias: `verify_email`.
+  </Card>
+  <Card title="StartSession" icon="play">
+    Starts the session before every request. Alias: `session`.
+  </Card>
+</CardGroup>
+
+### Authenticate
+
+```php
+// app/Middlewares/Authenticate.php
+public function handle(Request $request, \Closure $next)
+{
+    if (!Auth::check()) {
+        return redirect(route('login'));
+    }
+    return $next($request);
+}
+```
+
+### Guest
+
+```php
+// app/Middlewares/Guest.php
+public function handle(Request $request, \Closure $next)
+{
+    if (Auth::check()) {
+        return redirect(route('home'));
+    }
+    return $next($request);
+}
+```
+
+### VerifyCsrfToken
+
+```php
+// app/Middlewares/VerifyCsrfToken.php
+public function handle(Request $request, \Closure $next)
+{
+    $csrf_token = $request->input('_token') ?? null;
+    if ($request->method() == 'GET'
+        || strpos($request->path(), 'api') === 0
+        || strpos($request->path(), '/api') === 0
+    ) {
+        return $next($request);
+    }
+    if ($csrf_token == Session::get(Session::$key_csrf_token)
+        && $csrf_token == Cookie::get('CSRF_TOKEN')
+    ) {
+        return $next($request);
+    } else {
+        $request->session()->regenerateToken();
+        $request->session()->regenerate();
+        return abort(419, 'CSRF token invalid');
+    }
+}
+```
+
+<Note>
+  `VerifyCsrfToken` and `StartSession` are registered as **global** middleware in `MiddlewareService` and run on every request automatically.
+</Note>
+
+## Global middleware
+
+Middleware registered with `Middleware::middleware()` run on every request, before route-specific middleware.
+
+```php
+// app/Services/MiddlewareService.php
+public function handle()
+{
+    // Global middleware — runs on every request
+    Middleware::middleware([
+        \libs\Session\Middleware\StartSession::class,
+        \app\Middlewares\VerifyCsrfToken::class,
+    ]);
+
+    // Aliases available for use on individual routes
+    Middleware::middlewareAlias([
+        'auth'         => \app\Middlewares\Authenticate::class,
+        'auth_api'     => \app\Middlewares\AuthenticateApi::class,
+        'guest'        => \app\Middlewares\Guest::class,
+        'verify_email' => \app\Middlewares\VerifyEmail::class,
+        'csrf'         => \app\Middlewares\VerifyCsrfToken::class,
+        'session'      => \libs\Session\Middleware\StartSession::class,
+    ]);
+}
+```
+
+## Applying middleware to routes
+
+### Single route
+
+```php
+Route::get('/profile', 'ProfileController@show')->middleware('auth');
+
+Route::post('/profile', 'ProfileController@update')
+    ->middleware('auth')
+    ->middleware('verify_email');
+```
+
+### Chaining multiple middleware
+
+Call `->middleware()` multiple times or pass an array. The middleware execute in the order they are added.
+
+```php
+Route::get('/admin', 'AdminController@index')
+    ->middleware('auth')
+    ->middleware('admin');
+```
+
+### Route groups with shared middleware
+
+Use `Route::group()` to apply common middleware to a set of routes.
+
+```php
+Route::group(['middleware' => ['auth', 'verify_email']], function () {
+    Route::get('/dashboard', 'DashboardController@index');
+    Route::get('/settings',  'SettingsController@index');
+    Route::post('/settings', 'SettingsController@update');
+});
+```
+
+## Exception handling in middleware
+
+If an exception is thrown inside `handle()`, the router catches it and calls `report()` on the same middleware instance. Override `report()` to customise error handling.
+
+```php
+public function report(\Exception $ex)
+{
+    // Log the error, return a JSON response, etc.
+    return response()->json(['error' => $ex->getMessage()], 500);
+}
+```

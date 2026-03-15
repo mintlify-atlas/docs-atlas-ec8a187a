@@ -1,0 +1,89 @@
+---
+title: "Introduction"
+description: "A lightweight PHP MVC framework with routing, ORM, middleware, authentication, WebSocket server, and more."
+---
+
+## What is MVC PHP?
+
+MVC PHP is a lightweight PHP framework built around the Model-View-Controller architectural pattern. It provides all the core building blocks you need to build web applications quickly — without the overhead of a full-stack framework.
+
+It is a small prototype framework that includes:
+
+- **Routing** — Expressive HTTP routing with named routes, route groups, and URL parameters
+- **ORM** — An Eloquent-inspired object-relational mapper with relationships, pagination, and search
+- **Controllers & Views** — MVC separation with a simple PHP templating engine
+- **Middleware** — Chainable middleware pipeline for request/response processing
+- **Authentication** — Built-in auth system supporting database, PAM, and API token strategies
+- **WebSocket Server** — A simple Socket.io-inspired real-time server
+- **HTTP Client** — Guzzle-powered HTTP client for outbound requests
+- **CLI Console** — Custom command runner for artisan-style tasks
+- **Migrations** — Schema builder and migration system for database management
+- **Mailer** — Email sending via PHPMailer with SMTP support
+
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="rocket" href="/quickstart">
+    Get a working app running in minutes
+  </Card>
+  <Card title="Installation" icon="download" href="/installation">
+    Requirements and setup instructions
+  </Card>
+  <Card title="Routing" icon="route" href="/core/routing">
+    Define routes and handle HTTP requests
+  </Card>
+  <Card title="ORM" icon="database" href="/database/orm">
+    Work with your database using models
+  </Card>
+</CardGroup>
+
+## Architecture overview
+
+MVC PHP follows a standard MVC pattern where:
+
+- **Routes** (`routes/web.php`, `routes/api.php`) define URL-to-action mappings
+- **Controllers** (`app/Controllers/`) handle request logic and return responses
+- **Models** (`app/Models/`) represent database tables and encapsulate data access
+- **Views** (`resources/views/`) contain presentation templates
+- **Libs** (`libs/`) provide framework internals and utilities
+
+```
+mvc-php/
+├── app/
+│   ├── Controllers/     # Application controllers
+│   ├── Models/          # Eloquent-style models
+│   ├── Middlewares/     # Custom middleware classes
+│   └── Services/        # Application services
+├── config/              # Configuration files
+├── database/
+│   ├── migrations/      # Schema migration files
+│   └── seeders/         # Database seeders
+├── libs/                # Framework core libraries
+├── public/              # Web root (index.php)
+├── resources/
+│   └── views/           # Blade-like PHP templates
+├── routes/
+│   ├── web.php          # Web routes
+│   └── api.php          # API routes
+└── config.env           # Environment configuration
+```
+
+## Key libraries
+
+| Library | Purpose |
+|---------|---------|
+| `libs/Router/` | HTTP routing engine |
+| `libs/DB/` | ORM, query builder, schema, migrations |
+| `libs/Auth/` | Authentication drivers |
+| `libs/Middleware/` | Middleware pipeline |
+| `libs/View/` | Template rendering |
+| `libs/Session/` | Session management |
+| `libs/HTTP/` | Request, response, and HTTP client |
+| `libs/Socket/` | WebSocket server |
+| `libs/Console/` | CLI command runner |
+
+## Language and requirements
+
+MVC PHP is written in PHP and requires:
+
+- PHP `<= 8.1.31`
+- MySQL (or compatible) database
+- Composer for dependency management

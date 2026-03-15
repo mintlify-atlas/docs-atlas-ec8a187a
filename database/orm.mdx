@@ -1,0 +1,278 @@
+---
+title: "ORM"
+description: "Interact with your database using an Eloquent-inspired object-relational mapper built on top of PDO."
+---
+
+The ORM maps database rows to PHP objects. Each model class corresponds to a database table. You query through static methods on the model class, and results are returned as model instances.
+
+## Defining a model
+
+Extend `libs\DB\Model` and set the `$table` property. Add the columns that may be mass-assigned to `$fillable`. Columns listed in `$hidden` are stripped from every fetched model instance.
+
+```php app/Models/User.php
+<?php
+
+namespace app\Models;
+
+use libs\DB\Model;
+
+class User extends Model{
+
+    protected $table = "user";
+    protected $hidden = ["password"];
+    protected $fillable = [
+        "name",
+        "email",
+        "verified_email_at",
+        "password"
+    ];
+
+    public function full(){
+        return "Hola, " . $this->name;
+    }
+
+}
+```
+
+### Model properties
+
+| Property | Default | Description |
+|---|---|---|
+| `$table` | `null` | Table name. Can also be set via the `@Table` annotation on the class doc-comment. |
+| `$primary_key` | `"id"` | Primary key column name. |
+| `$fillable` | `[]` | Columns allowed in `create()` and `save()`. The primary key is always appended automatically. |
+| `$hidden` | `[]` | Columns removed from model instances after fetching. |
+| `$visible` | `[]` | Columns that override `$hidden` and are always shown. |
+| `$busable` | `null` | Columns searched by `search()`. Defaults to `$fillable` when `null`. |
+
+## CRUD operations
+
+### Creating records
+
+`create()` mass-assigns the given array, respecting `$fillable`, and persists the row. It returns the hydrated model instance.
+
+```php
+$user = User::create([
+    'name'     => 'Alice',
+    'email'    => 'alice@example.com',
+    'password' => password_hash('secret', PASSWORD_BCRYPT),
+]);
+
+echo $user->id; // auto-populated after insert
+```
+
+### Reading records
+
+```php
+// Find by primary key — returns a single model or null
+$user = User::find(1);
+
+// Find by any column
+$user = User::find('alice@example.com', 'email');
+
+// Find with a closure — returns the first match
+$user = User::find(function($query){
+    $query->where('email', 'alice@example.com');
+});
+
+// Find many — pass an array as the third argument
+$users = User::find('admin', 'name', []);
+
+// Retrieve all rows
+$users = User::all();
+```
+
+<Note>
+`find()` returns `null` when no row matches. Always check the return value before accessing properties.
+</Note>
+
+### Updating records
+
+Call `update()` on a model instance to persist new values. Only columns in `$fillable` are written.
+
+```php
+$user = User::find(1);
+$user->update([
+    'name' => 'Alice Updated',
+]);
+```
+
+You can also modify properties directly and call `save()`:
+
+```php
+$user = User::find(1);
+$user->name = 'Alice Updated';
+$user->save();
+```
+
+`save()` performs an `INSERT` when the primary key is absent or the record does not yet exist, and an `UPDATE` otherwise. `created_at` and `updated_at` are managed automatically.
+
+### Deleting records
+
+```php
+$user = User::find(1);
+$user->delete();
+```
+
+## Searching with `search()`
+
+`search()` applies a `LIKE` condition across every column listed in `$busable`, joining the clauses with `OR`.
+
+```php
+class Post extends Model{
+    protected $table    = 'post';
+    protected $fillable = ['title', 'body', 'author'];
+    protected $busable  = ['title', 'body', 'author'];
+}
+
+$posts = Post::search('php framework')->get();
+```
+
+When `$busable` is not set it falls back to `$fillable`.
+
+## Relationships
+
+Define relationship methods on the model. Accessing the method name as a **property** automatically executes the query.
+
+### `hasOne`
+
+A model owns one related record.
+
+```php
+class User extends Model{
+    protected $table = 'user';
+
+    public function profile(){
+        // hasOne(RelatedModel, join_column_on_owner_table)
+        return $this->hasOne(Profile::class, 'id_user');
+    }
+}
+
+$user    = User::find(1);
+$profile = $user->profile; // single model instance
+```
+
+### `hasMany`
+
+A model owns many related records.
+
+```php
+class User extends Model{
+    protected $table = 'user';
+
+    public function posts(){
+        // hasMany(RelatedModel, foreign_key_on_related_table)
+        return $this->hasMany(Post::class, 'id_user');
+    }
+}
+
+$user  = User::find(1);
+$posts = $user->posts; // array of Post models
+```
+
+### `manyToMany`
+
+Two models are linked through a pivot table.
+
+```php
+class User extends Model{
+    protected $table = 'user';
+
+    public function roles(){
+        // manyToMany(RelatedModel, PivotModel, pivot_fk_for_owner, pivot_fk_for_related)
+        return $this->manyToMany(Role::class, UserRole::class, 'id_user', 'id_role');
+    }
+}
+
+$user  = User::find(1);
+$roles = $user->roles; // array of Role models
+```
+
+#### Pivot operations
+
+The `Relation` object returned by the relationship method exposes helpers for managing pivot records.
+
+```php
+$user = User::find(1);
+
+// Attach one or more related IDs
+$user->roles()->attach([2, 3]);
+
+// Detach specific IDs
+$user->roles()->detach([2]);
+
+// Replace all pivot rows in one transaction
+$user->roles()->sync([3, 4]);
+
+// Check whether a pivot row exists
+$exists = $user->roles()->exists(3); // bool
+```
+
+## Eager-loading with `with()`
+
+Call `with()` before `get()` or `first()` to pre-load relationship data and avoid N+1 queries.
+
+```php
+// Eager-load a single relationship
+$users = User::with('posts')->get();
+
+// Eager-load a nested relationship (dot notation)
+$users = User::with('posts.comments')->get();
+
+// Attach arbitrary extra attributes to every result
+$users = User::with(['is_admin' => true])->get();
+```
+
+## Pagination
+
+`paginate()` returns a `Paginator` object containing the page data, link array, and totals.
+
+```php
+// Paginate with 15 results per page, page 1
+$paginator = User::paginate(15, 1);
+
+// With a filter callback
+$paginator = User::paginate(function($query){
+    $query->where('verified_email_at', null);
+}, 15, 1);
+
+// Paginator properties
+$paginator->data;             // array of model instances
+$paginator->current_page;     // int
+$paginator->total_pages;      // int
+$paginator->total_results;    // int
+$paginator->results_per_page; // int
+$paginator->links;            // array of link objects
+$paginator->info;             // localised summary string
+```
+
+Each entry in `$paginator->links` has three keys:
+
+| Key | Description |
+|---|---|
+| `label` | Display text (`prev`, page number, or `next`). |
+| `value` | Page number, `-1` for previous, `0` for next. |
+| `active` | `true` when this is the current page. |
+
+## Random records
+
+```php
+// Single random model
+$user = User::random();
+
+// Multiple random models
+$users = User::random(5);
+```
+
+## Chainable query methods
+
+Because `Model` proxies unknown static calls to `DB::table()`, every method on the query builder is available directly on the model class:
+
+```php
+$users = User::where('verified_email_at', '!=', null)
+    ->orderDesc('created_at')
+    ->limit(0, 10)
+    ->get();
+```
+
+See [Query builder](/database/query-builder) for the full list of available methods.
